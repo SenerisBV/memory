@@ -1,0 +1,540 @@
+{
+  "id": "db464d93-58a3-4da3-8e9f-63672c7e3783",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "memory.Alias": {
+      "name": "Alias",
+      "schema": "memory",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "authorAgent": {
+          "name": "authorAgent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "localKey": {
+          "name": "localKey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subjectKey": {
+          "name": "subjectKey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "Alias_authorAgent_localKey_key": {
+          "name": "Alias_authorAgent_localKey_key",
+          "columns": [
+            {
+              "expression": "authorAgent",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "localKey",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "Alias_subjectKey_idx": {
+          "name": "Alias_subjectKey_idx",
+          "columns": [
+            {
+              "expression": "subjectKey",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "memory.Contribution": {
+      "name": "Contribution",
+      "schema": "memory",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "authorAgent": {
+          "name": "authorAgent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subjectKey": {
+          "name": "subjectKey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "principalId": {
+          "name": "principalId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "why": {
+          "name": "why",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'contribution'"
+        },
+        "ts": {
+          "name": "ts",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "Contribution_subjectKey_ts_idx": {
+          "name": "Contribution_subjectKey_ts_idx",
+          "columns": [
+            {
+              "expression": "subjectKey",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ts",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "memory.Observation": {
+      "name": "Observation",
+      "schema": "memory",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "authorAgent": {
+          "name": "authorAgent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subjectKey": {
+          "name": "subjectKey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "about": {
+          "name": "about",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "predicate": {
+          "name": "predicate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valueNum": {
+          "name": "valueNum",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "unit": {
+          "name": "unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ts": {
+          "name": "ts",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sourceGrade": {
+          "name": "sourceGrade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'F6'"
+        },
+        "naturalKey": {
+          "name": "naturalKey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provenancePath": {
+          "name": "provenancePath",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "visibility": {
+          "name": "visibility",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'fleet'"
+        },
+        "supersededAt": {
+          "name": "supersededAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supersededById": {
+          "name": "supersededById",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'general'"
+        },
+        "topics": {
+          "name": "topics",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "ARRAY['general'::text]"
+        }
+      },
+      "indexes": {
+        "Observation_authorAgent_subjectKey_naturalKey_key": {
+          "name": "Observation_authorAgent_subjectKey_naturalKey_key",
+          "columns": [
+            {
+              "expression": "authorAgent",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "subjectKey",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "naturalKey",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "Observation_subjectKey_ts_idx": {
+          "name": "Observation_subjectKey_ts_idx",
+          "columns": [
+            {
+              "expression": "subjectKey",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ts",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "Observation_about_idx": {
+          "name": "Observation_about_idx",
+          "columns": [
+            {
+              "expression": "about",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "Observation_topics_idx": {
+          "name": "Observation_topics_idx",
+          "columns": [
+            {
+              "expression": "topics",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "Observation_supersededById_key": {
+          "name": "Observation_supersededById_key",
+          "columns": [
+            {
+              "expression": "supersededById",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "Observation_about_primary_check": {
+          "name": "Observation_about_primary_check",
+          "value": "cardinality(\"memory\".\"Observation\".\"about\") >= 1 AND \"memory\".\"Observation\".\"about\"[1] = \"memory\".\"Observation\".\"subjectKey\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "memory.Subject": {
+      "name": "Subject",
+      "schema": "memory",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attention": {
+          "name": "attention",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'track'"
+        },
+        "members": {
+          "name": "members",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "ARRAY[]::text[]"
+        },
+        "profileDirty": {
+          "name": "profileDirty",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "profilePath": {
+          "name": "profilePath",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "profileSynthAt": {
+          "name": "profileSynthAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp (3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "Subject_key_key": {
+          "name": "Subject_key_key",
+          "columns": [
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "Subject_attention_idx": {
+          "name": "Subject_attention_idx",
+          "columns": [
+            {
+              "expression": "attention",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "Subject_key_typed_check": {
+          "name": "Subject_key_typed_check",
+          "value": "\"memory\".\"Subject\".\"key\" ~ '^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9-]*$'"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "memory": "memory"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

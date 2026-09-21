@@ -1,0 +1,4 @@
+[test]
+# ORDER MATTERS. tests/db-guard.ts exits the process on a non-_test database
+# before tests/setup.ts (which opens a pool) is even loaded. Do not reorder.
+preload = ["./tests/db-guard.ts", "./tests/setup.ts"]
