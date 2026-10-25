@@ -44,10 +44,41 @@ createdb your_app_dev
 
 ```ts
 import { migrate } from "@seneris/memory";
-await migrate({ url: process.env.DATABASE_URL! });
+const { applied } = await migrate({ url: process.env.DATABASE_URL! });
 // Idempotent, but it takes NO LOCK: call it once at deploy, not concurrently
-// from every process that boots.
+// from every process that boots. `applied` lists the migrations this call ran.
+// Pass `schema` to use a name other than `memory` (must match ^[a-z][a-z0-9_]*$).
 ```
+
+## Quick start
+
+```ts
+import { createMemory, DEFAULT_REGISTRY, type CompleteFn } from "@seneris/memory";
+
+const complete: CompleteFn = async ({ tier, system, messages, jsonSchema }) => {
+  // call your model here; return its reply as plain text
+  return { text: await yourModel(system, messages[0].content, jsonSchema) };
+};
+
+const memory = createMemory({
+  agentId: "assistant",
+  synthesizer: "assistant",          // you own this store, so you consolidate it
+  complete,
+  registry: DEFAULT_REGISTRY,
+  dossierRoot: "./dossiers",
+  log: (e) => console.error(`[${e.kind}] ${e.source}: ${e.message}`),
+  db: { url: process.env.DATABASE_URL! },
+});
+
+try {
+  await memory.record({ source: "chat", observations: await memory.extract(someText) });
+} finally {
+  await memory.close();              // createMemory opens a pool; you own it
+}
+```
+
+`createMemory` opens a connection pool and never closes it on its own — a
+library doesn't get to decide how long your process lives. Call `close()`.
 
 ## The host contract
 
@@ -114,13 +145,57 @@ one and not ten — and the scripted stand-in in `examples/stranger.ts` keeps
 every observation in ONE group on purpose, so the example needs exactly one
 scripted verdict reply.
 
-`record` is the only call that writes. `consolidate` is the only call that
+An observation is `{ about, predicate, value, valueNum?, unit?, naturalKey?, grade? }`.
+`about` is a list of subject keys (`"person:someone"`), aliases you registered,
+or `{ type, label }` proposals for types the registry lets the model mint.
+The first entry is the subject the row is filed under; the rest are carried
+along and searched too. You can build observations yourself and skip
+`extract` entirely.
+
+`record` and `contribute` are the only calls that write. `consolidate` is the only call that
 turns raw rows into a dossier file — it's meant to run on its own schedule
 (a cron, a nightly job), not after every write, because a dossier is worth
 rewriting only once there's enough new evidence to say something different.
 Cadence is entirely your host's decision: the library never guesses how
 often you write or consolidate, because a library that guessed would report
 either a false alarm or a false all-clear.
+
+`consolidate` enforces the one-archivist rule in code: if `host.agentId`
+is not `host.synthesizer`, it throws instead of writing. Several agents can
+`record` into one store; only one consolidates it.
+
+### The rest of the surface
+
+```ts
+// A free-text note about one subject, kept beside the observations rather than
+// reconciled into them. It shows up in `project` and in the evidence for the next dossier.
+await memory.contribute({ about: "person:someone", content: "Prefers calls after 6pm.", why: "said so twice" });
+
+// The full readable evidence for a subject, or null if there's nothing.
+// `limit` raises the evidence cap for this call (useful when diffing two stores).
+const text = await memory.project("person:someone", { limit: 1000 });
+
+// Subject administration.
+await memory.subjects.getOrCreateSubject("person:someone", "Someone");
+await memory.subjects.getSubject("person:someone");          // row or null
+await memory.subjects.knownSubjects();                        // [{ key, label }]
+await memory.subjects.setMembers("group:team", ["person:a", "person:b"]); // for composite types
+await memory.subjects.putAlias("cust-4411", "person:someone"); // your id -> a subject key, per agentId
+await memory.subjects.resolveLocalKey("cust-4411");           // "person:someone", or the input unchanged
+```
+
+`recall` takes `{ name, intro, priority?, maxChars? }` and returns a
+prompt-section-shaped object; `maxChars` caps the body.
+
+### Who can read what
+
+Every observation carries a `visibility`. Rows written through `record`
+are `"fleet"`: readable by every agent that shares the store. `"author"`
+rows are readable only by the agent that wrote them. The library never
+creates one from fresh input, but a correction to an `"author"` row stays
+`"author"`, and an upsert can make a row more private but never less.
+Consolidation reads only `"fleet"` rows, because a dossier is visible to
+everyone. Aliases are scoped per `agentId`.
 
 ## health()
 
@@ -162,12 +237,64 @@ nothing but the JSON output contract once swung a *different* model's
 reconciliation accuracy from 58% correct to 0% coherent. Measure your own
 model against your own contract before trusting either.
 
+## Entry points and scripts
+
+`@seneris/memory` is the whole public surface. The subpaths
+`/registry`, `/host` and `/migrate` re-export pieces of it for hosts that
+want only those. `/adoptLegacy` is a one-off migration from the store this
+library was extracted from. It is not general-purpose, and new hosts can
+ignore it.
+
+| Script | What it does |
+| --- | --- |
+| `bun run db:migrate` | Apply migrations to `DATABASE_URL` from `.env` |
+| `bun run db:check` | Verify every declared table, index and constraint exists (`MEMORY_SCHEMA` overrides the schema name) |
+| `bun run db:generate` | Generate a new migration after a schema change. Read the SQL before applying it |
+| `bun run consolidate` | Run one consolidation pass from the environment (see below) |
+| `bun run example:stranger` | Run `examples/stranger.ts` against `.env`'s database |
+
+`bun run consolidate` is for a cron job:
+
+```bash
+MEMORY_STORE_URL=postgresql://localhost:5432/your_store \
+MEMORY_SYNTHESIZER_ID=archivist \
+MEMORY_DOSSIER_ROOT=./dossiers \
+MEMORY_COMPLETE_MODULE=./my-model.ts \
+  bun run consolidate --live
+```
+
+`MEMORY_COMPLETE_MODULE` names a file whose default export is a
+`CompleteFn`. If it's unset the runner still starts, and a pass with nothing
+to synthesize reports a clean no-op. A pass that needs the model then throws
+rather than writing a dossier from a stand-in. `MEMORY_SCHEMA` overrides the
+schema name. It refuses any database whose name doesn't end in `_test` unless you pass
+`--live`, and refuses `--live` on a `_test` database, so you can't run
+against a real store by accident.
+
 ## What isn't built
 
 - No SQLite or other embedded-database target — Postgres only.
 - No retrieval, ranking, or embeddings. `recall`/`project` return text; what's
   relevant to surface is your host's call, not this library's.
 - No adapters for a specific model provider. `complete` is the whole seam.
+
+## Developing
+
+```bash
+bun install
+createdb memory_dev && createdb memory_test
+cp .env.example .env && cp .env.test.example .env.test   # then edit the URLs
+bun run db:test:setup      # migrate memory_test
+bun run test               # the whole suite, against memory_test only
+bun run typecheck
+```
+
+Two guards run inside the suite. `src/guards.test.ts` fails if anything
+under `src/` imports a host's agent runtime, or contains a name from the
+guard list. The real list comes from `MEMORY_GUARD_NAMES` in `.env.test`;
+without it the test uses a generic default. Fixture data and prompt
+examples must be synthetic. The name guard doesn't check numbers, so
+reviewers have to.
 
 ## Two things never to do
 
