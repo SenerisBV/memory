@@ -5,6 +5,6 @@ export const MAX_OBS_PER_SYNTH = 80;
 export const RECALL_MAX_CHARS = 1800;
 export const SUPERSEDED_RETENTION_DAYS = 30;
 /** How many known subjects the extractor is shown: the most recently active
- *  N plus every `important` one (spec §13's default). A constant with a test
+ *  N plus every `important` one. A constant with a test
  *  (extract.test.ts), not a guess. */
 export const KNOWN_SUBJECTS_CAP = 40;

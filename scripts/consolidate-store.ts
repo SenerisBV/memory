@@ -1,4 +1,4 @@
-// The consolidation half of the archivist split (design spec §2): recording
+// The consolidation half of the archivist split (docs/DESIGN.md §7): recording
 // is multi-writer, consolidation is not, and this repo owns the half the
 // library itself enforces as single-writer. It is generic on purpose — it
 // knows nothing about who wrote the observations it turns into dossiers, so

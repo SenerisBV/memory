@@ -1,7 +1,7 @@
 // The KIND axis an observation is filed on. Topics moved to the registry
 // (host data); kinds stay built in because modality() is mechanism the merge
 // guard depends on. See
-// the observation-taxonomy design note.
+// docs/DESIGN.md §4.
 //
 // Pure by design: no Prisma, no host, no I/O. Both the classifier and the
 // verdict guard import their vocabulary from here so there is exactly one

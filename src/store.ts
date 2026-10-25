@@ -23,7 +23,7 @@ export interface ObservationData {
   visibility: string; kind: string; topics: string[];
 }
 
-// Moved in from agent-shared/scoping.ts (spec §7). Scopes AGENTS, not humans:
+// See docs/DESIGN.md §8. Scopes AGENTS, not humans:
 // "fleet" = every reader; "author" = only the writer. Deny by default: a
 // missing reader throws rather than reading unfiltered.
 export function visibilityCondition(tables: Tables, readerAgent: string): SQL {

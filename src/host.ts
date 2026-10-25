@@ -1,4 +1,4 @@
-// The host contract (spec §6). Every field is something every host has:
+// The host contract (README, "The host contract"). Every field is something every host has:
 // an id, a way to call a model, a registry, a directory, a logger, a URL.
 import type { Registry } from "./registry";
 

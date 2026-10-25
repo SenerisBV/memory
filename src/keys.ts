@@ -1,8 +1,5 @@
 // Ported verbatim from src/lib/memory/keys.ts (byte-identical in both
-// repos, zero host coupling — pure string helpers). Task 3 duplicated
-// `slugifyEntity`/`stripLeadingH1` locally into research/{context,
-// writeback}.ts as a temporary measure; this task deletes that duplication
-// (see research/context.ts and research/writeback.ts's updated imports).
+// repos, zero host coupling — pure string helpers).
 
 const LEADING_ARTICLE = /^(the|a|an)\s+/i;
 

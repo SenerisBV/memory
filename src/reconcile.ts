@@ -1,5 +1,4 @@
-// Read-before-write reconciliation. See
-// the reconciliation design note kept with the host that first ran this.
+// Read-before-write reconciliation. See docs/DESIGN.md §6.
 //
 // This module deliberately holds NO Prisma access. Rows in, verdicts out —
 // which is what makes the pure functions testable without a database and the
@@ -293,7 +292,7 @@ export function createReconcile(host: MemoryHost) {
 
     // userContent construction (renderLiveRows/renderCandidates) and the parse
     // are BOTH inside the try alongside the model call, deliberately. This
-    // module's entire purpose is to fail open, and a Task 2 review found that
+    // module's entire purpose is to fail open, and a review found that
     // `parseVerdicts` could throw on a non-integer `index` (a model returning
     // 1.5 clears a `< candidates.length` bounds check but indexes to
     // undefined). That specific bug is now guarded inside parseVerdicts, but

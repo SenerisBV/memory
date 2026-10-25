@@ -1,6 +1,6 @@
 // Write-free reconciliation pipeline: classify, group by primary topic,
 // retrieve per group, reconcile per group, apply the guard. See
-// the topic-scoped retrieval design note.
+// docs/DESIGN.md §6.
 //
 // This module holds NO Prisma access, for the same reason reconcile.ts does
 // not: the caller injects a row-fetching closure, which is what lets the whole

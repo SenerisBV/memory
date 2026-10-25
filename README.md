@@ -15,6 +15,10 @@ one agent identity, the `synthesizer`, is allowed to consolidate a given
 store, so there is one archivist, one dossier per subject, and no two
 processes racing to overwrite each other's file.
 
+[docs/DESIGN.md](docs/DESIGN.md) explains why it's built this way: the
+write pipeline, the kind taxonomy, grades, visibility, and the single
+archivist.
+
 `examples/stranger.ts` runs the whole loop — extract, record, consolidate,
 recall, health — against nothing but a fresh database and a scripted stand-in
 model. It is also this project's own exit test: `bun run test

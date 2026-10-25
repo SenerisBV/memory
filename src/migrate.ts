@@ -1,7 +1,8 @@
 // Applies drizzle/'s generated SQL, in journal order, into the schema the
 // host named. drizzle-kit writes "memory"."Table" literally, so the schema
 // name is substituted textually; that is safe because every generated
-// statement qualifies the schema (Task 4 Step 3 checks) and no table or
+// statement qualifies the schema (migrate.db.test.ts lands the same history in a
+// second schema to prove it) and no table or
 // column is called "memory". History lives in <schema>_migrations, the same
 // per-owner shape the fleet uses.
 import { readFile } from "node:fs/promises";

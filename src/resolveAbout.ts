@@ -1,4 +1,4 @@
-// Read-before-write for subjects (spec §2 decision 6). The extractor may
+// Read-before-write for subjects (docs/DESIGN.md §3). The extractor may
 // name an existing key, an alias the host registered, or propose {type,
 // label}. A proposal is matched by label (case-insensitive, within the type),
 // then by ALIAS, then by slug before anything is created; only a

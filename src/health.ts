@@ -1,4 +1,4 @@
-// The first exported function after the constructor (direction doc §1).
+// The first exported function after the constructor (docs/DESIGN.md §10).
 // `computeHealth` is pure: takes dates, returns flags. The wrappers that
 // FETCH the dates — a host-side job for a legacy store, `healthOf`
 // at the bottom of this file for the library's own — are thin on purpose, so

@@ -1,6 +1,6 @@
 // Ported verbatim from src/lib/memory/prompts.ts (byte-identical in both
-// repos). Plan 4R Task 4 hard invariant: memory prompts are behavior —
-// verbatim moves only, zero content changes.
+// repos). Memory prompts are behavior: they moved verbatim, with zero
+// content changes, and any change since is a behavior change.
 import type { Registry } from "./registry";
 
 export const DOSSIER_SYNTH_SYSTEM = `You maintain a long-term dossier of a subject, written as Markdown.
