@@ -98,6 +98,8 @@ interface MemoryHost {
   log: (event) => void | Promise<void>;  // your logger; must not throw
   db: { url: string; schema?: string };  // the Postgres URL, and an optional schema name
   lens?: Lens;            // optional: filter a recalled body, or replace the extraction prompt
+  supersededRetentionDays?: number | null; // days a superseded row is kept before consolidate() reaps it;
+                                           // absent = 30, null = never reap (reaped is always 0)
 }
 ```
 
@@ -183,6 +185,8 @@ const text = await memory.project("person:someone", { limit: 1000 });
 await memory.subjects.getOrCreateSubject("person:someone", "Someone");
 await memory.subjects.getSubject("person:someone");          // row or null
 await memory.subjects.knownSubjects();                        // [{ key, label }]
+await memory.subjects.recentlyActive({ type: "pursuit", limit: 5 }); // [{ key, label, lastEvidenceAt }], newest evidence first
+                                                              // evidence = newest live observation ABOUT the key, or newest contribution; no evidence = omitted
 await memory.subjects.setMembers("group:team", ["person:a", "person:b"]); // for composite types
 await memory.subjects.putAlias("cust-4411", "person:someone"); // your id -> a subject key, per agentId
 await memory.subjects.resolveLocalKey("cust-4411");           // "person:someone", or the input unchanged

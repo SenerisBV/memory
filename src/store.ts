@@ -69,6 +69,32 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return [...important, ...recent];
   }
 
+  /** Subjects of one type, newest evidence first. Evidence = the newest LIVE
+   *  observation whose `about` contains the key, or the newest contribution to
+   *  it. A subject with neither is left out. */
+  async function recentlyActive(opts: { type: string; limit: number }): Promise<{ key: string; label: string; lastEvidenceAt: Date }[]> {
+    const limit = Math.max(0, Math.floor(opts.limit));
+    if (limit === 0) return [];
+    const r = await db.execute(sql`
+      SELECT s."key" AS key, s."label" AS label, e.last_at::text AS "lastEvidenceAt"
+      FROM ${subject} s
+      JOIN LATERAL (
+        SELECT max(t.at) AS last_at FROM (
+          SELECT o."ts" AS at FROM ${observation} o WHERE o."supersededById" IS NULL AND o."about" @> ARRAY[s."key"]
+          UNION ALL
+          SELECT c."ts" AS at FROM ${contribution} c WHERE c."subjectKey" = s."key"
+        ) t
+      ) e ON true
+      WHERE s."key" LIKE ${opts.type + ":%"} AND e.last_at IS NOT NULL
+      ORDER BY e.last_at DESC, s."key" ASC
+      LIMIT ${limit}`);
+    return (r.rows as { key: string; label: string; lastEvidenceAt: string }[]).map((x) => ({
+      key: x.key, label: x.label,
+      // Selected as text: node-pg would parse a zoneless timestamp in the process's local zone. The session is UTC (db.ts).
+      lastEvidenceAt: new Date(x.lastEvidenceAt.replace(" ", "T") + "Z"),
+    }));
+  }
+
   async function findSubjectByLabel(type: string, label: string): Promise<SubjectRow | null> {
     const [row] = await db.select().from(subject)
       .where(and(sql`${subject.key} LIKE ${type + ":%"}`, eq(sql`lower(${subject.label})`, label.toLowerCase())))
@@ -280,8 +306,12 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return row?.at ?? null;
   }
 
+  /** The host's retention, resolved: absent = the default, null = never reap
+   *  (this returns 0 and runs no DELETE). */
   async function reapSuperseded(now: Date): Promise<number> {
-    const cutoff = new Date(now.getTime() - SUPERSEDED_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const days = host.supersededRetentionDays === undefined ? SUPERSEDED_RETENTION_DAYS : host.supersededRetentionDays;
+    if (days === null) return 0;
+    const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     const r = await db.delete(observation)
       .where(and(sql`${observation.supersededById} IS NOT NULL`, lt(observation.supersededAt, cutoff)))
       .returning({ id: observation.id });
@@ -289,7 +319,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
   }
 
   return {
-    getSubject, getOrCreateSubject, knownSubjects, findSubjectByLabel, setMembers, markDirty,
+    getSubject, getOrCreateSubject, knownSubjects, recentlyActive, findSubjectByLabel, setMembers, markDirty,
     dirtySubjects, setProfile, subjectByProfilePath,
     resolveLocalKey, putAlias, liveRowsAbout, evidence, contributions, insertObservation, supersede,
     insertContribution, reapSuperseded, lastWriteByAuthor, lastConsolidateAt,

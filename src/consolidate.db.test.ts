@@ -94,6 +94,30 @@ test("superseded rows older than the retention window are reaped, newer ones kep
   expect((await handle.db.select().from(handle.tables.observation)).length).toBe(3);
 });
 
+test("consolidate keeps superseded rows forever when supersededRetentionDays is null", async () => {
+  const host = fakeHost({ supersededRetentionDays: null });
+  const store = createStore(handle, host);
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const a = await store.insertObservation(obs("person:ann", ["person:ann"], "p", "old"));
+  const b = await store.insertObservation(obs("person:ann", ["person:ann"], "p", "new"));
+  await store.supersede(a.id, b.id, new Date(Date.now() - 400 * 86_400_000));
+  const r = await createConsolidate(host, store).consolidate({ synth: fakeComplete([]).fn });
+  expect(r.reaped).toBe(0);
+  expect((await handle.db.select().from(handle.tables.observation)).length).toBe(2);
+});
+
+test("a numeric supersededRetentionDays replaces the 30-day default", async () => {
+  const host = fakeHost({ supersededRetentionDays: 500 });
+  const store = createStore(handle, host);
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const a = await store.insertObservation(obs("person:ann", ["person:ann"], "p", "old"));
+  const b = await store.insertObservation(obs("person:ann", ["person:ann"], "p", "new"));
+  await store.supersede(a.id, b.id, new Date(Date.now() - 400 * 86_400_000));
+  const r = await createConsolidate(host, store).consolidate({ synth: fakeComplete([]).fn });
+  expect(r.reaped).toBe(0);
+  expect((await handle.db.select().from(handle.tables.observation)).length).toBe(2);
+});
+
 // Beyond the brief's five: archiveAnticipations only runs on a RE-synthesis,
 // so none of the tests above reaches it. Without this one the whole
 // archive-the-prior-forecast path is unexercised.

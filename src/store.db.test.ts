@@ -249,3 +249,34 @@ test("lastWriteByAuthor takes the newest write per author across both tables", a
   expect(rows.map((r) => r.author)).toEqual(["other", "tester"]);
   expect(rows.map((r) => r.at?.toISOString())).toEqual([newer.toISOString(), newer.toISOString()]);
 });
+
+test("recentlyActive orders pursuits by newest evidence and skips empty ones", async () => {
+  const day = 86_400_000;
+  const now = Date.now();
+  const o = (key: string, ts: Date) => ({ subjectKey: key, about: [key], predicate: "p", value: "v", source: "test", sourceGrade: "C3", naturalKey: null, visibility: "fleet", kind: "general", topics: ["general"], ts, valueNum: null, unit: null, provenancePath: null });
+  for (const [k, l] of [["pursuit:a", "A"], ["pursuit:b", "B"], ["pursuit:c", "C"], ["person:x", "X"]] as const) await store.getOrCreateSubject(k, l);
+  await store.insertObservation(o("pursuit:a", new Date(now - day)));
+  await store.insertContribution({ subjectKey: "pursuit:b", content: "c", why: "w", source: "contribution", principalId: null, ts: new Date(now - 2 * 3_600_000) });
+  await store.insertObservation(o("person:x", new Date(now)));
+  const r = await store.recentlyActive({ type: "pursuit", limit: 5 });
+  expect(r.map((x) => x.key)).toEqual(["pursuit:b", "pursuit:a"]);
+  expect(r[0]!.label).toBe("B");
+  expect(r[0]!.lastEvidenceAt).toBeInstanceOf(Date);
+  expect((await store.recentlyActive({ type: "pursuit", limit: 1 })).map((x) => x.key)).toEqual(["pursuit:b"]);
+});
+
+test("recentlyActive counts a live row that is only ABOUT the subject, and ignores superseded rows", async () => {
+  const day = 86_400_000;
+  const now = Date.now();
+  const o = (key: string, about: string[], ts: Date) => ({ subjectKey: key, about, predicate: "p", value: "v", source: "test", sourceGrade: "C3", naturalKey: null, visibility: "fleet", kind: "general", topics: ["general"], ts, valueNum: null, unit: null, provenancePath: null });
+  for (const [k, l] of [["pursuit:a", "A"], ["pursuit:d", "D"], ["person:x", "X"]] as const) await store.getOrCreateSubject(k, l);
+  await store.insertObservation(o("pursuit:a", ["pursuit:a"], new Date(now - 10 * day)));
+  await store.insertObservation(o("person:x", ["person:x", "pursuit:a"], new Date(now - day)));
+  const old = await store.insertObservation(o("pursuit:d", ["pursuit:d"], new Date(now - 1000)));
+  const repl = await store.insertObservation(o("pursuit:d", ["pursuit:d"], new Date(now - 20 * day)));
+  await store.supersede(old.id, repl.id, new Date());
+  const r = await store.recentlyActive({ type: "pursuit", limit: 5 });
+  expect(r.map((x) => x.key)).toEqual(["pursuit:a", "pursuit:d"]);
+  expect(r[0]!.lastEvidenceAt.getTime()).toBe(now - day);
+  expect(r[1]!.lastEvidenceAt.getTime()).toBe(now - 20 * day);
+});

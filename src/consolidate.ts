@@ -194,7 +194,8 @@ export function createConsolidate(host: MemoryHost, store: Store) {
     if (synthesized.length > 0) await safeLog({ kind: "INFO", source: "memory", message: `consolidated ${synthesized.length} subject(s)`, payload: { count: synthesized.length }, traceId: opts.traceId });
     // Rides consolidation rather than a separate cron — a reaper nobody schedules never runs. Runs last and isolated.
     let reaped = 0;
-    try { reaped = await store.reapSuperseded(now); } catch (err) {
+    // supersededRetentionDays: null = the host keeps history forever; no DELETE is issued.
+    try { if (host.supersededRetentionDays !== null) reaped = await store.reapSuperseded(now); } catch (err) {
       await safeLog({ kind: "ERROR", source: "memory", message: `reapSuperseded failed: ${err instanceof Error ? err.message : String(err)}`, traceId: opts.traceId });
     }
     return { synthesized, reaped };

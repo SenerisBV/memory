@@ -41,4 +41,8 @@ export interface MemoryHost {
   log: (event: LogEvent) => void | Promise<void>;
   db: { url: string; schema?: string };
   lens?: Lens;
+  /** How long a superseded row is kept before consolidate() reaps it. Absent =
+   *  30 days. `null` = never reap: consolidate() deletes nothing and reports
+   *  `reaped: 0`. A host whose store is its record of history passes null. */
+  supersededRetentionDays?: number | null;
 }

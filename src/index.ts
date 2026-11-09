@@ -36,7 +36,7 @@ export interface Memory {
   consolidate: ReturnType<typeof createConsolidate>["consolidate"];
   recall: ReturnType<typeof createRecall>["recall"];
   project: ReturnType<typeof createProject>["projectDossier"];
-  subjects: Pick<Store, "getOrCreateSubject" | "getSubject" | "setMembers" | "putAlias" | "resolveLocalKey" | "knownSubjects">;
+  subjects: Pick<Store, "getOrCreateSubject" | "getSubject" | "setMembers" | "putAlias" | "resolveLocalKey" | "knownSubjects" | "recentlyActive">;
   health(opts: { writeCadenceDays: number; consolidateCadenceDays: number; now?: Date }): Promise<HealthReport>;
   calibrate: ReturnType<typeof createCalibration>["recordPredictionOutcome"];
   close(): Promise<void>;
@@ -60,6 +60,7 @@ export function createMemory(host: MemoryHost): Memory {
       putAlias: store.putAlias,
       resolveLocalKey: store.resolveLocalKey,
       knownSubjects: store.knownSubjects,
+      recentlyActive: store.recentlyActive,
     },
     /** Both cadences come from the host. There is no default: a library that
      *  guesses how often its host writes reports a false alarm or, worse, a
