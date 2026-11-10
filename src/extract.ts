@@ -20,12 +20,18 @@ function isAboutEntry(x: unknown): x is AboutEntry {
   return !!x && typeof x === "object" && typeof (x as { type?: unknown }).type === "string" && typeof (x as { label?: unknown }).label === "string";
 }
 
-export function coerceObservations(raw: unknown[]): ObservationInput[] {
+/** `defaultAbout`: the subject a host files a subject-less observation under.
+ *  Absent, such an observation is dropped (there is nothing to file it under);
+ *  present, it is kept as `about: [defaultAbout]`. A host that ran the
+ *  extractor FOR a known subject (one pass per subject) loses a
+ *  fact otherwise, merely because the model left `about` empty. */
+export function coerceObservations(raw: unknown[], defaultAbout?: string): ObservationInput[] {
   const out: ObservationInput[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
-    const about = Array.isArray(o.about) ? o.about.filter(isAboutEntry) : [];
+    let about = Array.isArray(o.about) ? o.about.filter(isAboutEntry) : [];
+    if (about.length === 0 && defaultAbout) about = [defaultAbout];
     const predicate = typeof o.predicate === "string" ? o.predicate.trim() : "";
     const value = typeof o.value === "string" ? o.value.trim() : "";
     if (about.length === 0 || !predicate || !value) continue;
@@ -38,7 +44,7 @@ export function coerceObservations(raw: unknown[]): ObservationInput[] {
 }
 
 export function createExtract(host: MemoryHost, store: Store) {
-  async function extractObservations(text: string, opts: { complete?: CompleteFn; traceId?: string } = {}): Promise<ObservationInput[]> {
+  async function extractObservations(text: string, opts: { complete?: CompleteFn; traceId?: string; defaultAbout?: string } = {}): Promise<ObservationInput[]> {
     const run = opts.complete ?? host.complete;
     const known = await store.knownSubjects();
     const system = host.lens?.extractionPrompts?.system ?? extractSystemPrompt(host.registry, known);
@@ -47,7 +53,7 @@ export function createExtract(host: MemoryHost, store: Store) {
     // look like a text with nothing in it (the fleet learned this on
     // 2026-08-31 — 22 "succeeded" captures during an outage).
     const res = await run({ tier: "low", system, messages: [{ role: "user", content: text.slice(0, 12_000) }], jsonSchema, maxTokens: 4000, source: "memory-extract", traceId: opts.traceId });
-    return coerceObservations(parseObservationArray(res.text));
+    return coerceObservations(parseObservationArray(res.text), opts.defaultAbout?.trim() || undefined);
   }
   return { extractObservations };
 }

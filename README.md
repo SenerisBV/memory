@@ -158,6 +158,11 @@ The first entry is the subject the row is filed under; the rest are carried
 along and searched too. You can build observations yourself and skip
 `extract` entirely.
 
+`extract` drops an observation whose `about` comes back empty, since there is
+nothing to file it under. A host that runs the extractor *for* a known subject
+can pass `memory.extract(text, { defaultAbout: "group:household" })`: a
+subject-less observation is then kept as `about: ["group:household"]` instead.
+
 `record` and `contribute` are the only calls that write. `consolidate` is the only call that
 turns raw rows into a dossier file — it's meant to run on its own schedule
 (a cron, a nightly job), not after every write, because a dossier is worth

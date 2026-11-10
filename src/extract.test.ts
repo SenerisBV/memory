@@ -46,3 +46,22 @@ test("the lens may replace the system prompt wholesale", async () => {
   await createExtract(host, store).extractObservations("x", { complete: fn });
   expect(calls[0]!.system).toBe("CUSTOM");
 });
+
+test("defaultAbout files an observation with no subject under the host's default instead of dropping it", async () => {
+  const host = fakeHost();
+  const store = createStore(handle, host);
+  const answer = JSON.stringify([
+    { about: [], predicate: "dinner-time", value: "18:00 on weekdays" },
+    { predicate: "bins-go-out", value: "Tuesday evening" },
+    { about: ["person:ann"], predicate: "has-class", value: "art on Wednesdays" },
+  ]);
+  const withDefault = await createExtract(host, store).extractObservations("x", { complete: fakeComplete([answer]).fn, defaultAbout: "group:home" });
+  expect(withDefault.map((o) => [o.about, o.predicate])).toEqual([
+    [["group:home"], "dinner-time"],
+    [["group:home"], "bins-go-out"],
+    [["person:ann"], "has-class"],
+  ]);
+  // Without it, the old rule stands: no subject, no observation.
+  const without = await createExtract(host, store).extractObservations("x", { complete: fakeComplete([answer]).fn });
+  expect(without.map((o) => o.predicate)).toEqual(["has-class"]);
+});
