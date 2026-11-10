@@ -140,6 +140,27 @@ test("a STORE failure while resolving is rethrown, never swallowed into recorded
   })).rejects.toThrow(/boom/);
 });
 
+test("a batch whose every write throws reports writeFailed, so a host can fail instead of reading recorded: 0 (M1)", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const broken = { ...store, insertObservation: async () => { throw new Error("insert refused"); } };
+  const brokenRecord = createRecord(host, broken);
+  const r = await brokenRecord.recordObservations({
+    source: "office-visit", classify, reconcile: recordAll,
+    observations: [
+      { about: ["person:ann"], predicate: "likes", value: "sailing" },
+      { about: ["person:ann"], predicate: "likes", value: "cycling" },
+    ],
+  });
+  expect(r).toMatchObject({ recorded: 0, writeFailed: 2 });
+  const ok = await record.recordObservations({
+    source: "office-visit", classify, reconcile: recordAll,
+    observations: [{ about: ["person:ann"], predicate: "likes", value: "rowing" }],
+  });
+  expect(ok).toMatchObject({ recorded: 1, writeFailed: 0 });
+  const empty = await record.recordObservations({ source: "office-visit", classify, reconcile: recordAll, observations: [] });
+  expect(empty.writeFailed).toBe(0);
+});
+
 // The `c<N>` arm of the same gap. `restates` naming a STORED row was guarded
 // against cross-subject loss; `restates` naming an earlier CANDIDATE was not,
 // and it discards a fact just as completely.

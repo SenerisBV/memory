@@ -150,7 +150,11 @@ export interface RecordContributionInput {
 export function createRecord(host: MemoryHost, store: Store) {
   const resolveAbout = createResolveAbout(host, store);
 
-  async function recordObservations(input: RecordObservationsInput): Promise<{ recorded: number; upserted: number; restated: number; superseded: number; minted: number }> {
+  /** `writeFailed` counts candidate writes that threw (and were dropped). A
+   *  host that sees `recorded: 0` with `writeFailed > 0` knows every write
+   *  attempt failed — the "succeeded with zero" shape — and can fail its job
+   *  instead of reporting an empty batch (final review M1, 2026-11-10). */
+  async function recordObservations(input: RecordObservationsInput): Promise<{ recorded: number; upserted: number; restated: number; superseded: number; minted: number; writeFailed: number }> {
     const ts = input.ts ?? new Date();
     const ceiling = gradeForSource(input.source);
 
@@ -203,7 +207,7 @@ export function createRecord(host: MemoryHost, store: Store) {
       candidatesRaw.push({ ...o, keys: r.keys });
     }
     const candidates = candidatesRaw;
-    if (candidates.length === 0) return { recorded: 0, upserted: 0, restated: 0, superseded: 0, minted };
+    if (candidates.length === 0) return { recorded: 0, upserted: 0, restated: 0, superseded: 0, minted, writeFailed: 0 };
 
     // Every subject this batch touches, deduped. It is what retrieval spans,
     // what the reconciler is told it is judging, and what gets dirtied.
@@ -782,7 +786,7 @@ export function createRecord(host: MemoryHost, store: Store) {
       // Swallowed deliberately — see comment above.
     }
 
-    return { recorded, upserted, restated, superseded, minted };
+    return { recorded, upserted, restated, superseded, minted, writeFailed };
   }
 
   // A deliberate statement about a subject, not an extracted observation: it

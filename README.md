@@ -134,7 +134,9 @@ means only your own code may create one, via `subjects.getOrCreateSubject`.
 ```ts
 const observations = await memory.extract(someText);           // model call #1: what did this text say?
 const result = await memory.record({ source: "call", observations }); // model calls #2, #3: classify, then reconcile against what's live
-// { recorded, upserted, restated, superseded, minted }
+// { recorded, upserted, restated, superseded, minted, writeFailed }
+// writeFailed: candidate writes that threw. recorded 0 with writeFailed > 0
+// means every write failed — fail your job rather than report an empty batch.
 
 const pass = await memory.consolidate({ minObs: 3 });           // one model call per dirty subject with enough evidence
 // { synthesized: [{ key, bytes }], reaped }
