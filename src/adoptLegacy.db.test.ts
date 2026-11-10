@@ -197,3 +197,36 @@ test("an observation whose canonicalKey has no dossier refuses the whole copy", 
   const [row] = (await db.execute(sql.raw(`SELECT count(*) AS n FROM "memory"."Subject"`))).rows as { n: string }[];
   expect(Number(row!.n)).toBe(0);
 });
+
+test("adoption rewrites profilePath and marks every subject dirty", async () => {
+  const { db } = handle;
+  await db.execute(sql.raw(
+    `UPDATE "${LEGACY}"."MemoryDossier" SET "profilePath" = '_compiled/memory/subjects/household.md', "profileDirty" = false WHERE "canonicalKey" = 'household'`,
+  ));
+  const r = await adoptLegacyStore({
+    url: TEST_URL,
+    legacySchema: LEGACY,
+    rewriteProfilePath: (p) => p.split("/").pop()!,
+    markAllDirty: true,
+  });
+  const rows = (await db.execute(sql.raw(`SELECT key, "profilePath" AS p, "profileDirty" AS d FROM "memory"."Subject" ORDER BY key`))).rows as { key: string; p: string | null; d: boolean }[];
+  const household = rows.find((x) => x.key === "group:household")!;
+  expect(household.p).toBe("household.md");
+  expect(household.d).toBe(true);
+  // Every copied subject is dirty; a null path stays null (never rewritten).
+  expect(rows.every((x) => x.d === true)).toBe(true);
+  expect(rows.filter((x) => x.key !== "group:household").every((x) => x.p === null)).toBe(true);
+  expect(r.after.checksum).toBe(r.before.checksum);
+  expect(r.after.observations).toBe(r.before.observations);
+});
+
+test("default adoption leaves profilePath and profileDirty as copied", async () => {
+  const { db } = handle;
+  await db.execute(sql.raw(
+    `UPDATE "${LEGACY}"."MemoryDossier" SET "profilePath" = '_compiled/memory/subjects/household.md' WHERE "canonicalKey" = 'household'`,
+  ));
+  await adoptLegacyStore({ url: TEST_URL, legacySchema: LEGACY });
+  const [h] = (await db.execute(sql.raw(`SELECT "profilePath" AS p, "profileDirty" AS d FROM "memory"."Subject" WHERE key = 'group:household'`))).rows as { p: string; d: boolean }[];
+  expect(h!.p).toBe("_compiled/memory/subjects/household.md");
+  expect(h!.d).toBe(false);
+});

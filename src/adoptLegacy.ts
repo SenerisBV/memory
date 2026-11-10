@@ -86,7 +86,12 @@ export async function adoptLegacyStore(opts: {
    *  are left live and untouched; collapsing duplicates WITHIN a subject is
    *  reconciliation's job, not the copy's. */
   duplicates?: { keepKey: string; dropKey: string };
-}): Promise<AdoptResult> {
+  /** Applied to every non-null copied `profilePath` (legacy paths are
+   *  relative to a knowledge root, the library's to its dossierRoot). */
+  rewriteProfilePath?: (legacyPath: string) => string;
+  /** Set `profileDirty = true` on every copied subject. */
+  markAllDirty?: boolean;
+}):Promise<AdoptResult> {
   const schema = opts.schema ?? memorySchemaName;
   const legacy = opts.legacySchema;
   for (const name of [schema, legacy]) if (!IDENT.test(name)) throw new Error(`schema name "${name}" is not an identifier`);
@@ -153,6 +158,17 @@ export async function adoptLegacyStore(opts: {
       await run(`INSERT INTO ${N("Subject")} (id, key, label, attention, "profileDirty", "profilePath", "profileSynthAt", "createdAt", "updatedAt")
         SELECT d.id, m.new, d.label, d.attention, d."profileDirty", d."profilePath", d."profileSynthAt", d."createdAt", d."updatedAt"
         FROM ${L("MemoryDossier")} d JOIN (VALUES ${mapValues}) AS m(old, new) ON m.old = d."canonicalKey"`);
+
+      // Legacy profilePaths are relative to a knowledge root; the library
+      // resolves them against its dossierRoot. Rewritten per distinct path.
+      if (opts.rewriteProfilePath) {
+        const paths = (await run(`SELECT DISTINCT "profilePath" AS p FROM ${N("Subject")} WHERE "profilePath" IS NOT NULL`)).rows as { p: string }[];
+        for (const { p } of paths) {
+          await run(`UPDATE ${N("Subject")} SET "profilePath" = ${literal(opts.rewriteProfilePath(p))} WHERE "profilePath" = ${literal(p)}`);
+        }
+      }
+      // Every dossier is rewritten on the first consolidation.
+      if (opts.markAllDirty) await run(`UPDATE ${N("Subject")} SET "profileDirty" = true`);
 
       // A group rolls up the people. The legacy store had no membership at
       // all — the household dossier was just another key — so this is the one
