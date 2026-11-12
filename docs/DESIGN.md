@@ -237,7 +237,11 @@ The repository is public. The package isn't published, on purpose.
   is live in every consumer immediately, with no release, version bump or
   reinstall. The flip side is that a new migration must reach every
   consumer's store before new processes start, or `record` fails at
-  `markDirty`.
+  `markDirty`. So the repo's git hooks run `scripts/migrate-hosts.ts`
+  whenever `drizzle/` changes on `main`, closing that window at the moment
+  it opens. Migration runs as each store's owner role. It can't happen when
+  a host boots, because hosts connect as roles that can't run DDL, and
+  `migrate()` takes no lock.
 - **Publishing is a deliberate decision, not a default.** Before any public
   release, the source, fixtures and prompts get a scan for real names and
   real figures. The name guard has never checked numbers (see CLAUDE.md).

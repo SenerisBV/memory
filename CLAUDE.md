@@ -24,3 +24,8 @@ A memory library with no agent in it.
 - `src/adoptLegacy.ts` copies a pre-existing store into this schema. It reads
   the source read-only, and only from a dump or at the adoption step — never
   with write intent against a live store.
+- Hosts run this checkout through `file:` links, so a migration on `main` is
+  live at once. `.githooks/` migrates every store in the gitignored
+  `.memory-hosts.local.json` when `drizzle/` changes on `main`; it needs
+  `git config core.hooksPath .githooks`. If the hook prints a FAILED banner, a
+  live store is behind: fix it and rerun `bun scripts/migrate-hosts.ts --live`.

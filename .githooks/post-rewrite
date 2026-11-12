@@ -1,0 +1,4 @@
+#!/bin/sh
+# git pull --rebase / git rebase. (An amend also runs post-commit.)
+[ "$1" = "rebase" ] || exit 0
+exec "$(git rev-parse --show-toplevel)/.githooks/migrate-if-drizzle-changed" ORIG_HEAD

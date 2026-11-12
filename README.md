@@ -267,6 +267,7 @@ ignore it.
 | `bun run db:generate` | Generate a new migration after a schema change. Read the SQL before applying it |
 | `bun run consolidate` | Run one consolidation pass from the environment (see below) |
 | `bun run example:stranger` | Run `examples/stranger.ts` against `.env`'s database |
+| `bun scripts/migrate-hosts.ts --live` | Migrate every live store listed in `.memory-hosts.local.json`, then run each one's post-migrate step (see below) |
 
 `bun run consolidate` is for a cron job:
 
@@ -285,6 +286,25 @@ rather than writing a dossier from a stand-in. `MEMORY_SCHEMA` overrides the
 schema name. It refuses any database whose name doesn't end in `_test` unless you pass
 `--live`, and refuses `--live` on a `_test` database, so you can't run
 against a real store by accident.
+
+### Keeping local hosts migrated
+
+A host that depends on a local checkout (`file:../memory`) runs whatever is on
+that checkout's `main`, so a new migration breaks it until its store is
+migrated. `scripts/migrate-hosts.ts` migrates every store in a gitignored
+`.memory-hosts.local.json`, as the role in each store's own env file, then runs
+that store's optional `after` command (grants, typically). The file format is
+in the script's header. URLs are read from the env files and never printed.
+
+The repo's git hooks run it for you whenever `drizzle/` changes on `main`
+(merge, commit or rebase). Enable them once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+A host that installs from GitHub instead runs `migrate()` at its own deploy,
+as above.
 
 ## What isn't built
 

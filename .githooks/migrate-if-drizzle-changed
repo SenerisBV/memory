@@ -1,0 +1,24 @@
+#!/bin/sh
+# Shared by post-merge, post-commit and post-rewrite. Hosts run this checkout
+# through file: links, so a migration on main is live the moment it lands; this
+# migrates every live store right then. See scripts/migrate-hosts.ts.
+# $1 = the ref main was at before this change.
+base="$1"
+[ "$(git symbolic-ref --short -q HEAD)" = "main" ] || exit 0
+if git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1; then
+  git diff --quiet "$base" HEAD -- drizzle/ && exit 0
+fi
+root="$(git rev-parse --show-toplevel)"
+hosts="${MEMORY_HOSTS_FILE:-$root/.memory-hosts.local.json}"
+if [ ! -f "$hosts" ]; then
+  echo "memory: drizzle/ changed on main but there is no $hosts; no store was migrated." >&2
+  exit 0
+fi
+echo "memory: drizzle/ changed on main; migrating live stores..."
+if ! (cd "$root" && bun scripts/migrate-hosts.ts --live); then
+  echo "" >&2
+  echo "!!! memory: a live store FAILED to migrate. Consumers already run the new code;" >&2
+  echo "!!! record() will fail against that store until it is migrated. Fix it, then:" >&2
+  echo "!!!   bun scripts/migrate-hosts.ts --live" >&2
+fi
+exit 0
