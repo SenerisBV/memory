@@ -6,7 +6,7 @@
 // Column shapes are column-for-column with the fleet's legacy tables where
 // the column survived, so the adoption copy is a projection, not a rewrite.
 import { sql } from "drizzle-orm";
-import { boolean, check, doublePrecision, index, pgSchema, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, check, doublePrecision, index, integer, pgSchema, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { createId } from "@paralleldrive/cuid2";
 
 export const memorySchemaName = "memory";
@@ -25,6 +25,10 @@ export function buildTables(schemaName: string) {
       attention: text("attention").notNull().default("track"),
       members: text("members").array().notNull().default(sql`ARRAY[]::text[]`),
       profileDirty: boolean("profileDirty").notNull().default(false),
+      // Bumped by every write that dirties the subject. consolidate clears
+      // profileDirty only if this still equals what it read, so a write that
+      // lands mid-synthesis is not erased. See docs/DESIGN.md §7.
+      dirtyGen: integer("dirtyGen").notNull().default(0),
       profilePath: text("profilePath"),
       profileSynthAt: ts3("profileSynthAt"),
       createdAt: ts3("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),

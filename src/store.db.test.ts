@@ -183,12 +183,38 @@ test("liveRowsAbout with no keys answers empty instead of erroring", async () =>
 test("setProfile records the path and the synth time, and clears the dirty flag", async () => {
   await store.getOrCreateSubject("person:ann", "Ann");
   await store.markDirty(["person:ann"]);
+  const seen = (await store.getSubject("person:ann"))!.dirtyGen;
   const at = new Date("2026-02-03T04:05:06Z");
-  await store.setProfile("person:ann", { profilePath: "subjects/person-ann.md", profileSynthAt: at });
+  await store.setProfile("person:ann", { profilePath: "subjects/person-ann.md", profileSynthAt: at, seenDirtyGen: seen });
   const s = await store.getSubject("person:ann");
   expect(s?.profilePath).toBe("subjects/person-ann.md");
   expect(s?.profileSynthAt?.toISOString()).toBe(at.toISOString());
   expect(s?.profileDirty).toBe(false);
+});
+
+test("markDirty bumps dirtyGen on the subject and on every composite listing it, and setMembers bumps it too", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await store.getOrCreateSubject("group:home", "Home");
+  expect((await store.getSubject("person:ann"))?.dirtyGen).toBe(0);
+  await store.setMembers("group:home", ["person:ann"]);
+  expect((await store.getSubject("group:home"))?.dirtyGen).toBe(1);
+  await store.markDirty(["person:ann"]);
+  await store.markDirty(["person:ann"]);
+  expect((await store.getSubject("person:ann"))?.dirtyGen).toBe(2);
+  expect((await store.getSubject("group:home"))?.dirtyGen).toBe(3);
+});
+
+test("setProfile with a stale dirtyGen records the path but leaves the subject dirty", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await store.markDirty(["person:ann"]);
+  const seen = (await store.getSubject("person:ann"))!.dirtyGen;
+  await store.markDirty(["person:ann"]); // dirtied again after the pass read it
+  const at = new Date("2026-02-03T04:05:06Z");
+  await store.setProfile("person:ann", { profilePath: "subjects/person-ann.md", profileSynthAt: at, seenDirtyGen: seen });
+  const s = await store.getSubject("person:ann");
+  expect(s?.profilePath).toBe("subjects/person-ann.md");
+  expect(s?.profileSynthAt?.toISOString()).toBe(at.toISOString());
+  expect(s?.profileDirty).toBe(true);
 });
 
 test("lastWriteByAuthor is per author, and an empty store reports nobody", async () => {
@@ -215,8 +241,8 @@ test("lastConsolidateAt is the newest profileSynthAt, and null before any synthe
 
   const older = new Date("2026-02-03T04:05:06.000Z");
   const newer = new Date("2026-03-04T05:06:07.000Z");
-  await store.setProfile("person:ann", { profilePath: "a.md", profileSynthAt: newer });
-  await store.setProfile("person:bob", { profilePath: "b.md", profileSynthAt: older });
+  await store.setProfile("person:ann", { profilePath: "a.md", profileSynthAt: newer, seenDirtyGen: 0 });
+  await store.setProfile("person:bob", { profilePath: "b.md", profileSynthAt: older, seenDirtyGen: 0 });
   const at = await store.lastConsolidateAt();
   expect(at).toBeInstanceOf(Date);
   expect(at?.toISOString()).toBe(newer.toISOString());

@@ -1,0 +1,1 @@
+ALTER TABLE "memory"."Subject" ADD COLUMN "dirtyGen" integer DEFAULT 0 NOT NULL;

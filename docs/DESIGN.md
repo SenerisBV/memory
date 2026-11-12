@@ -154,6 +154,19 @@ agent. When every row shares an author, source and grade, that citation is
 stated once instead of on every line. Repeated identical citations add
 nothing, and the model starts echoing them into the prose.
 
+One archivist doesn't make consolidation free of races, because recording
+keeps running while it works. A pass reads a subject, waits on the model,
+then marks the subject clean. A `record` that lands during that wait marks
+it dirty again, and an unconditional clear would erase that mark. The
+dossier would then miss the new row until some unrelated write dirtied the
+subject. Nothing would error. So every write that dirties a subject also
+bumps its `dirtyGen` counter, incremented in SQL so concurrent writers can't
+lose each other's bump. The pass clears the flag only if `dirtyGen` still
+matches what it read before reading the evidence. Otherwise the dossier is
+still written and recorded, but the subject stays dirty for the next pass.
+It's an optimistic concurrency check, the same idea as hashing a memory
+before and after drafting an edit.
+
 A failure on one subject is logged and the pass continues. If the previous
 dossier is unreadable, the synthesizer is told "(none yet)" rather than the
 pass failing.

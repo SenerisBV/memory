@@ -159,7 +159,9 @@ export function createConsolidate(host: MemoryHost, store: Store) {
     // The pass's clock, not the wall clock: `now` is what the archive stamp
     // and the reaper cutoff are read off, and a caller that pins it expects
     // one instant for the whole pass, not three.
-    await store.setProfile(s.key, { profilePath: relative, profileSynthAt: now });
+    // s.dirtyGen was read by dirtySubjects() before any evidence was, so a
+    // record() that lands after that read keeps the subject dirty.
+    await store.setProfile(s.key, { profilePath: relative, profileSynthAt: now, seenDirtyGen: s.dirtyGen });
     return { key: s.key, bytes: Buffer.byteLength(grounded, "utf8") };
   }
 

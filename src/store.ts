@@ -8,7 +8,7 @@ import type { Tables } from "./schema";
 
 export interface SubjectRow {
   id: string; key: string; label: string; attention: string; members: string[];
-  profileDirty: boolean; profilePath: string | null; profileSynthAt: Date | null;
+  profileDirty: boolean; dirtyGen: number; profilePath: string | null; profileSynthAt: Date | null;
 }
 
 export interface LiveRow {
@@ -108,15 +108,22 @@ export function createStore(handle: Handle, host: MemoryHost) {
    *  member happened to dirty it. */
   async function setMembers(key: string, members: string[]): Promise<void> {
     for (const m of members) assertDeclaredKey(host.registry, m);
-    const r = await db.update(subject).set({ members, profileDirty: true }).where(eq(subject.key, key)).returning({ id: subject.id });
+    const r = await db.update(subject).set({ members, ...dirty() }).where(eq(subject.key, key)).returning({ id: subject.id });
     if (r.length === 0) throw new Error(`setMembers: no subject "${key}"`);
+  }
+
+  /** Every write that dirties a subject also bumps its dirtyGen, in the same
+   *  statement. The increment is evaluated by Postgres, so two concurrent
+   *  writers each bump it and neither is lost. setProfile compares against it. */
+  function dirty() {
+    return { profileDirty: true, dirtyGen: sql`${subject.dirtyGen} + 1` };
   }
 
   async function markDirty(keys: string[]): Promise<void> {
     if (keys.length === 0) return;
-    await db.update(subject).set({ profileDirty: true }).where(inArray(subject.key, keys));
+    await db.update(subject).set(dirty()).where(inArray(subject.key, keys));
     // A member's write dirties every composite that lists it.
-    await db.update(subject).set({ profileDirty: true }).where(arrayOverlaps(subject.members, keys));
+    await db.update(subject).set(dirty()).where(arrayOverlaps(subject.members, keys));
   }
 
   /** Every subject a consolidation pass should look at: dirty, and not
@@ -134,10 +141,20 @@ export function createStore(handle: Handle, host: MemoryHost) {
   /** Records where a dossier landed and when — and clears the dirty flag in
    *  the SAME statement, so a subject can never be left reading as
    *  synthesized-and-still-dirty (which would re-synthesize it forever) or
-   *  clean-with-no-path. */
-  async function setProfile(key: string, opts: { profilePath: string; profileSynthAt: Date }): Promise<void> {
+   *  clean-with-no-path.
+   *
+   *  The clear is a compare-and-swap. `seenDirtyGen` is the dirtyGen the
+   *  caller read BEFORE it read the evidence. If anything dirtied the subject
+   *  since then, the dossier may predate that write, so the path and time are
+   *  still recorded but the flag stays set and the next pass picks it up.
+   *  Required, not optional: an unconditional clear is the lost-update bug. */
+  async function setProfile(key: string, opts: { profilePath: string; profileSynthAt: Date; seenDirtyGen: number }): Promise<void> {
     await db.update(subject)
-      .set({ profilePath: opts.profilePath, profileSynthAt: opts.profileSynthAt, profileDirty: false })
+      .set({
+        profilePath: opts.profilePath,
+        profileSynthAt: opts.profileSynthAt,
+        profileDirty: sql`CASE WHEN ${subject.dirtyGen} = ${opts.seenDirtyGen} THEN false ELSE ${subject.profileDirty} END`,
+      })
       .where(eq(subject.key, key));
   }
 

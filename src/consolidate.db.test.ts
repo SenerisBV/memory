@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { handle, resetDb } from "../tests/setup";
 import { fakeComplete, fakeHost } from "../tests/fakes";
-import { createConsolidate } from "./consolidate";
+import { createConsolidate, type SynthFn } from "./consolidate";
 import { subjectFile } from "./keys";
 import { createStore } from "./store";
 
@@ -40,6 +40,31 @@ test("a dirty subject above the threshold is synthesized to a file under dossier
   expect(s?.profileDirty).toBe(false);
   expect(s?.profilePath).toBe("subjects/person-ann.md");
   expect(s?.profileSynthAt).not.toBeNull();
+});
+
+test("a write that lands while the model is synthesizing keeps the subject dirty", async () => {
+  // The lost-update race: consolidate reads the evidence, waits on the model,
+  // then clears the dirty flag. A record() in that window marks the subject
+  // dirty again, and an unconditional clear would erase that mark: the
+  // dossier would silently miss the new row until something else dirtied
+  // the subject. The clear must be conditional on nothing having dirtied it
+  // since the pass read it.
+  const host = fakeHost();
+  const store = createStore(handle, host);
+  await store.getOrCreateSubject("person:ann", "Ann");
+  for (const [p, v] of [["owns", "a bike"], ["pays-rent", "1540"], ["plans", "a trip"]]) await store.insertObservation(obs("person:ann", ["person:ann"], p!, v!));
+  await store.markDirty(["person:ann"]);
+  const synth: SynthFn = async () => {
+    // a concurrent record(), mid-synthesis
+    await store.insertObservation(obs("person:ann", ["person:ann"], "moved-to", "the coast"));
+    await store.markDirty(["person:ann"]);
+    return { text: "## Model\n\nAnn owns a bike.\n" };
+  };
+  const r = await createConsolidate(host, store).consolidate({ synth });
+  expect(r.synthesized.map((s) => s.key)).toEqual(["person:ann"]); // the dossier is still written
+  const s = await store.getSubject("person:ann");
+  expect(s?.profilePath).toBe("subjects/person-ann.md");
+  expect(s?.profileDirty).toBe(true); // ...but the late write is not forgotten
 });
 
 test("below the threshold nothing is synthesized and the subject stays dirty", async () => {
@@ -147,7 +172,7 @@ test("a dossier that cannot be read is logged as an ERROR, not mistaken for a fi
   const store = createStore(handle, host);
   await store.getOrCreateSubject("person:ann", "Ann");
   for (const [p, v] of [["owns", "a bike"], ["pays-rent", "1540"], ["plans", "a trip"]]) await store.insertObservation(obs("person:ann", ["person:ann"], p!, v!));
-  await store.setProfile("person:ann", { profilePath: "subjects/nope.md", profileSynthAt: new Date() }); // a path with no file behind it
+  await store.setProfile("person:ann", { profilePath: "subjects/nope.md", profileSynthAt: new Date(), seenDirtyGen: 0 }); // a path with no file behind it
   await store.markDirty(["person:ann"]);
   const r = await createConsolidate(host, store).consolidate({ synth: fakeComplete(["## Model\n\nAnn.\n"]).fn });
   const errs = host.events.filter((e) => e.kind === "ERROR" && e.message.includes("dossier read failed"));
