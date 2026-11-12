@@ -221,3 +221,85 @@ Known rough edges:
   leaves it dirty rather than overwriting, but there's no automatic rename.
 - The library has no tuned model claims. Every threshold above came from
   one deployment's model. Re-measure with your own before trusting them.
+
+### Why it isn't on npm
+
+The repository is public. The package isn't published, on purpose.
+
+- **It's Bun-only source.** Relative imports are extensionless
+  (`from "./calibration"`). Bun resolves them and Node doesn't. Node also
+  won't strip TypeScript types for files under `node_modules`, so a
+  registry install would load out of the box only on Bun or through a
+  bundler. Hosts that already run it under Node do so through a `file:`
+  link plus a module-resolution shim, which works only because the link
+  points outside `node_modules`.
+- **`file:` links are the faster loop for our own hosts.** A merge to `main`
+  is live in every consumer immediately, with no release, version bump or
+  reinstall. The flip side is that a new migration must reach every
+  consumer's store before new processes start, or `record` fails at
+  `markDirty`.
+- **Publishing is a deliberate decision, not a default.** Before any public
+  release, the source, fixtures and prompts get a scan for real names and
+  real figures. The name guard has never checked numbers (see CLAUDE.md).
+
+Publishing would need relative imports with `.ts` extensions, a build to
+JavaScript (TypeScript's `rewriteRelativeImportExtensions` handles the
+rewrite), a trimmed `files` list (no tests or local config), and that scan.
+Until someone outside our own hosts wants it, `bun add
+github:SenerisBV/memory` is enough.
+
+### Ideas under consideration
+
+These came from comparing the library against Anthropic's account of how it
+builds production memory: versioned, permissioned stores that agents edit
+during a session, plus an out-of-band pass it calls *dreaming* that reviews
+many sessions at once. We already had most of the production half:
+superseding instead of deleting, per-agent visibility, one archivist, plain
+markdown dossiers. Their concurrency point turned up a real bug, the
+lost-update race fixed with `dirtyGen` ([§7](#7-consolidation-and-the-single-synthesizer)).
+The dreaming half is where the ideas below come from. None are built.
+
+1. **Propose dossier changes instead of writing them.** Their dreaming pass
+   never edits memory directly. It proposes each change with the sessions
+   that show the pattern and how often it occurred, and a human accepts or
+   rejects it. `consolidate` overwrites the dossier. The anticipation
+   section's `[evidence: …]` markers are already halfway there. An optional
+   staging mode, writing a proposed dossier and a diff beside the live one,
+   would suit subjects where a wrong dossier is costly.
+2. **Measure and propose new kinds and topics automatically.** §4 says kinds
+   are added when a measured share of rows falls through to `general` and
+   reading them shows a recurring shape. That's a dreaming job done by hand.
+   A pass across the whole store could cluster the `general` rows and
+   propose new kinds or topics, with example rows and their share of the
+   total, for a person to accept. This is probably the best fit of the six:
+   it needs visibility across subjects and its own budget, and it leaves
+   the decision to a person, which is exactly their argument for doing this
+   work outside a session.
+3. **Check for stale facts.** A live row stops being live only when
+   something newer contradicts it. A `waiting-on` row nobody mentions again
+   stays live forever. A review pass could flag rows likely to be stale for
+   their kind and age, then lower their grade (confidence only goes down,
+   §5) or propose a supersede through the existing guard. It would never
+   delete.
+4. **Keep dossier versions.** Dossiers are overwritten in place, and only
+   the anticipation section is archived. Keeping each previous version,
+   plus the observation ids it was built from, would allow rollback and
+   show what changed a dossier. Committing `dossierRoot` to git after each
+   pass would be the cheapest way to start.
+5. **Look for patterns across subjects.** `consolidate` sees one subject at
+   a time, so nothing notices patterns across the store, such as every
+   pursuit dossier missing the same kind of fact. The cheapest start that
+   stays in scope is a store-wide pass over `calibrate` rows, looking for
+   predictions that miss in the same direction.
+6. **Close the injection gap in contributions.** Observations are clamped
+   by grade ceilings (§5). Contributions skip reconciliation and go
+   straight into the synthesis prompt with no grade, which makes them the
+   easiest way to plant something in a dossier. Fixes include a grade or
+   source ceiling for contributions, or marking them as untrusted in the
+   synthesis prompt.
+
+Deliberately out of scope: most of their dreaming mines agent transcripts
+for the *agent's own* lessons, such as tools that keep failing or mistakes
+repeated across sessions. This library keeps facts about subjects, not
+lessons for agents. Mining transcripts belongs in the host, for the same
+reason retrieval does (§1).
