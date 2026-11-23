@@ -88,6 +88,9 @@ export function buildTables(schemaName: string) {
       id: cuid(),
       authorAgent: text("authorAgent").notNull(),
       subjectKey: text("subjectKey").notNull(),
+      // Every subject this note is about; the first is the filed subjectKey.
+      // Empty only transiently: the 0003 migration backfills older rows.
+      about: text("about").array().notNull().default(sql`'{}'::text[]`),
       principalId: text("principalId"),
       content: text("content").notNull(),
       why: text("why").notNull(),
@@ -98,7 +101,10 @@ export function buildTables(schemaName: string) {
       ts: ts3("ts").notNull().default(sql`CURRENT_TIMESTAMP`),
       createdAt: ts3("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
     },
-    (t) => [index("Contribution_subjectKey_ts_idx").on(t.subjectKey, t.ts)],
+    (t) => [
+      index("Contribution_subjectKey_ts_idx").on(t.subjectKey, t.ts),
+      index("Contribution_about_idx").using("gin", t.about),
+    ],
   );
 
   const alias = s.table(

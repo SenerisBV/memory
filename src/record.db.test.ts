@@ -2,6 +2,7 @@ import { beforeEach, expect, test } from "bun:test";
 
 import { handle, resetDb } from "../tests/setup";
 import { fakeHost } from "../tests/fakes";
+import { createProject } from "./project";
 import { createRecord } from "./record";
 import { createStore } from "./store";
 
@@ -281,4 +282,32 @@ test("record stores the actor on observations", async () => {
   const without = rows.find((r) => r.predicate === "has-pet")!;
   expect(withActor).toMatchObject({ actorKind: "person", actorId: "42", actorLabel: "Pat Biller" });
   expect(without).toMatchObject({ actorKind: null, actorId: null, actorLabel: null });
+});
+
+test("a contribution about two subjects is found under either", async () => {
+  await store.getOrCreateSubject("person:noor", "Noor");
+  await store.getOrCreateSubject("group:home", "Home");
+  await record.recordContribution({ about: ["person:noor", "group:home"], content: "bill modifier 25 for this pair" });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(row!.subjectKey).toBe("person:noor");
+  expect(row!.about).toEqual(["person:noor", "group:home"]);
+  for (const key of ["group:home", "person:noor"]) {
+    expect((await store.contributions(key, 10)).length).toBe(1);
+    expect(await createProject(host, store).projectDossier(key)).toContain("bill modifier 25 for this pair");
+  }
+  expect((await store.getSubject("person:noor"))?.profileDirty).toBe(true);
+  expect((await store.getSubject("group:home"))?.profileDirty).toBe(true);
+});
+
+test("a string about still files and stores about = [key]", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await record.recordContribution({ about: "person:ann", content: "x" });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(row!.about).toEqual(["person:ann"]);
+});
+
+test("an unknown subject among several throws and writes nothing", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await expect(record.recordContribution({ about: ["person:ann", "person:nobody"], content: "x" })).rejects.toThrow();
+  expect((await handle.db.select().from(handle.tables.contribution)).length).toBe(0);
 });

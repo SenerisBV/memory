@@ -140,8 +140,10 @@ export interface RecordObservationsInput {
 export type { Actor };
 
 export interface RecordContributionInput {
-  /** One subject: an existing key, a host-registered alias, or a proposal. */
-  about: string;
+  /** One subject (an existing key, a host-registered alias, or a proposal), or
+   *  several. The first is the subject the note is filed under; all are stored
+   *  and the note is found under any of them. */
+  about: string | string[];
   content: string;
   /** Optional; stored as "" when absent. */
   why?: string;
@@ -802,13 +804,14 @@ export function createRecord(host: MemoryHost, store: Store) {
   // proposal works here too; a string that names no known subject throws
   // rather than filing the statement somewhere it does not belong.
   async function recordContribution(input: RecordContributionInput): Promise<{ id: string }> {
-    const { keys } = await resolveAbout([input.about]);
+    const { keys } = await resolveAbout(Array.isArray(input.about) ? input.about : [input.about]);
     // resolveAbout throws for a string that is undeclared or unknown, so a
     // string entry either resolves or does not return — there is no dropped
-    // case for a single string to leave `keys` empty.
+    // case for a string to leave `keys` empty (an empty array is the only way).
+    if (keys.length === 0) throw new Error("recordContribution: `about` names no subject");
     const subjectKey = keys[0]!;
     const { id } = await store.insertContribution({
-      subjectKey,
+      subjectKey, about: keys,
       content: input.content.trim(),
       why: (input.why ?? "").trim(),
       source: input.source ?? "contribution",
@@ -816,7 +819,7 @@ export function createRecord(host: MemoryHost, store: Store) {
       ts: input.ts ?? new Date(),
       actorKind: input.actor?.kind ?? null, actorId: input.actor?.id ?? null, actorLabel: input.actor?.label ?? null,
     });
-    await store.markDirty([subjectKey]);
+    await store.markDirty(keys);
     return { id };
   }
 

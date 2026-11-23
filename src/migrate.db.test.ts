@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 
 import { openDb } from "./db";
 import { migrate } from "./migrate";
-import { TEST_URL } from "../tests/setup";
+import { TEST_URL, handle, resetDb } from "../tests/setup";
 
 test("migrate is idempotent", async () => {
   expect((await migrate({ url: TEST_URL })).applied).toEqual([]);
@@ -31,4 +31,21 @@ test("a schema name that is not an identifier is refused", async () => {
   await expect(migrate({ url: TEST_URL, schema: 'x"; DROP SCHEMA public; --' })).rejects.toThrow(/must match/);
   // …and by openDb itself, which a host calls without going through migrate.
   expect(() => openDb(TEST_URL, 'x"; DROP SCHEMA public; --')).toThrow(/must match/);
+});
+
+test("the Contribution.about backfill sets about = [subjectKey] for rows that predate it", async () => {
+  const dir = new URL("../drizzle/", import.meta.url).pathname;
+  const file = (await import("node:fs")).readdirSync(dir).find((f) => f.startsWith("0003_"))!;
+  const stmts = (await import("node:fs")).readFileSync(dir + file, "utf8").split("--> statement-breakpoint");
+  const backfill = stmts.find((s) => /UPDATE\s+"memory"\."Contribution"|UPDATE\s+"Contribution"/.test(s))!;
+  expect(backfill).toBeDefined();
+  await resetDb();
+  await handle.db.insert(handle.tables.subject).values({ key: "person:old", label: "Old" });
+  // a pre-migration row: the new column's default leaves about empty
+  await handle.db.insert(handle.tables.contribution).values({ authorAgent: "a", subjectKey: "person:old", content: "c", why: "", about: [] });
+  await handle.db.execute(sql.raw(backfill));
+  const r = await handle.db.execute(sql`SELECT "about" FROM "memory"."Contribution"`);
+  expect((r.rows[0] as { about: string[] }).about).toEqual(["person:old"]);
+  const empty = await handle.db.execute(sql`SELECT count(*)::int AS n FROM "memory"."Contribution" WHERE cardinality("about") = 0`);
+  expect((empty.rows[0] as { n: number }).n).toBe(0);
 });

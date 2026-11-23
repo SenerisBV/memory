@@ -10,7 +10,7 @@ const INDEXES = [
   "Subject_pkey", "Subject_key_key", "Subject_attention_idx",
   "Observation_pkey", "Observation_authorAgent_subjectKey_naturalKey_key", "Observation_subjectKey_ts_idx",
   "Observation_about_idx", "Observation_topics_idx", "Observation_supersededById_key",
-  "Contribution_pkey", "Contribution_subjectKey_ts_idx",
+  "Contribution_pkey", "Contribution_subjectKey_ts_idx", "Contribution_about_idx",
   "Alias_pkey", "Alias_authorAgent_localKey_key", "Alias_subjectKey_idx",
 ] as const;
 

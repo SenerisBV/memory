@@ -83,7 +83,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
         SELECT max(t.at) AS last_at FROM (
           SELECT o."ts" AS at FROM ${observation} o WHERE o."supersededById" IS NULL AND o."about" @> ARRAY[s."key"]
           UNION ALL
-          SELECT c."ts" AS at FROM ${contribution} c WHERE c."subjectKey" = s."key"
+          SELECT c."ts" AS at FROM ${contribution} c WHERE c."about" @> ARRAY[s."key"]
         ) t
       ) e ON true
       WHERE s."key" LIKE ${opts.type + ":%"} AND e.last_at IS NOT NULL
@@ -207,7 +207,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
 
   async function contributions(key: string, limit: number) {
     return db.select({ authorAgent: contribution.authorAgent, content: contribution.content, why: contribution.why, ts: contribution.ts })
-      .from(contribution).where(eq(contribution.subjectKey, key)).orderBy(desc(contribution.ts)).limit(limit);
+      .from(contribution).where(arrayOverlaps(contribution.about, [key])).orderBy(desc(contribution.ts)).limit(limit);
   }
 
   /** Writes one observation, upserting when the caller supplied a natural key.
@@ -264,8 +264,8 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return r.length > 0;
   }
 
-  async function insertContribution(data: { subjectKey: string; content: string; why: string; source: string; principalId: string | null; ts: Date; actorKind?: string | null; actorId?: string | null; actorLabel?: string | null }): Promise<{ id: string }> {
-    const [row] = await db.insert(contribution).values({ ...data, authorAgent: host.agentId }).returning({ id: contribution.id });
+  async function insertContribution(data: { subjectKey: string; about?: string[]; content: string; why: string; source: string; principalId: string | null; ts: Date; actorKind?: string | null; actorId?: string | null; actorLabel?: string | null }): Promise<{ id: string }> {
+    const [row] = await db.insert(contribution).values({ ...data, about: data.about ?? [data.subjectKey], authorAgent: host.agentId }).returning({ id: contribution.id });
     return row!;
   }
 
