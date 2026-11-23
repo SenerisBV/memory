@@ -16,7 +16,7 @@
 // file no longer does.
 import { createClassify } from "./classify";
 import { decide, type DecideInput, type DecideLiveRow, type FetchLiveRowsArgs } from "./decide";
-import type { Actor, ObservationInput } from "./extract";
+import { assertActor, type Actor, type ObservationInput } from "./extract";
 import { clampGrade, gradeForSource } from "./grade";
 import type { MemoryHost } from "./host";
 import { buildNaturalKey, slugifyEntity } from "./keys";
@@ -165,6 +165,9 @@ export function createRecord(host: MemoryHost, store: Store) {
   async function recordObservations(input: RecordObservationsInput): Promise<{ recorded: number; upserted: number; restated: number; superseded: number; minted: number; writeFailed: number }> {
     const ts = input.ts ?? new Date();
     const ceiling = gradeForSource(input.source);
+    // Every actor is checked before anything is written: a bad one fails the
+    // batch whole rather than leaving it half-recorded.
+    for (const o of input.observations) if (o.actor !== undefined) assertActor(o.actor, "recordObservations");
 
     // Read-before-write, per candidate. `about` may name a known key, an
     // agent-local alias, or PROPOSE a subject that gets minted here
@@ -804,6 +807,7 @@ export function createRecord(host: MemoryHost, store: Store) {
   // proposal works here too; a string that names no known subject throws
   // rather than filing the statement somewhere it does not belong.
   async function recordContribution(input: RecordContributionInput): Promise<{ id: string }> {
+    if (input.actor !== undefined) assertActor(input.actor, "recordContribution");
     const { keys } = await resolveAbout(Array.isArray(input.about) ? input.about : [input.about]);
     // resolveAbout throws for a string that is undeclared or unknown, so a
     // string entry either resolves or does not return — there is no dropped

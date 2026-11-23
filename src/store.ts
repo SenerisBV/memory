@@ -3,7 +3,7 @@ import { and, arrayOverlaps, asc, desc, eq, inArray, isNull, lt, max, ne, or, sq
 import { ATTENTION, KNOWN_SUBJECTS_CAP, SUPERSEDED_RETENTION_DAYS } from "./constants";
 import type { Handle } from "./db";
 import type { MemoryHost } from "./host";
-import type { Actor } from "./extract";
+import { assertActor, type Actor } from "./extract";
 import { assertDeclaredKey } from "./registry";
 import type { Tables } from "./schema";
 
@@ -321,6 +321,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
    *  tombstone does), so a later re-observation inserts a fresh live row
    *  instead of upserting into the retired one and vanishing. */
   async function retire(opts: { id: string; actor: Actor; reason: string }): Promise<boolean> {
+    assertActor(opts.actor, "retire");
     const mark = { retiredAt: new Date(), retiredByKind: opts.actor.kind, retiredById: opts.actor.id, retiredReason: opts.reason };
     // One transaction: a failed markDirty must not leave a row retired
     // while its subjects' dossiers still read as current.

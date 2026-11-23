@@ -422,3 +422,17 @@ test("listContributions excludes retired notes", async () => {
   const rows = await store.listContributions({ about: ["pursuit:a"] });
   expect(rows.map((r) => r.id)).toEqual([keep.id]);
 });
+
+test("re-observing a natural key: an actor replaces the actor, no actor keeps it", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const at = (actor?: { kind: string; id: string; label?: string }) =>
+    store.insertObservation({ ...retireObs("v"), naturalKey: "nk-actor", actorKind: actor?.kind ?? null, actorId: actor?.id ?? null, actorLabel: actor?.label ?? null });
+  const read = async () => (await handle.db.select().from(handle.tables.observation))
+    .map((r) => [r.actorKind, r.actorId, r.actorLabel]);
+  const a = await at({ kind: "person", id: "A", label: "Ann B" });
+  expect(await read()).toEqual([["person", "A", "Ann B"]]);
+  expect((await at()).id).toBe(a.id);
+  expect(await read()).toEqual([["person", "A", "Ann B"]]);
+  expect((await at({ kind: "agent", id: "B" })).id).toBe(a.id);
+  expect(await read()).toEqual([["agent", "B", null]]);
+});

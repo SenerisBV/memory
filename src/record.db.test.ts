@@ -311,3 +311,22 @@ test("an unknown subject among several throws and writes nothing", async () => {
   await expect(record.recordContribution({ about: ["person:ann", "person:nobody"], content: "x" })).rejects.toThrow();
   expect((await handle.db.select().from(handle.tables.contribution)).length).toBe(0);
 });
+
+test("contribute, record and retire refuse an actor with an empty id or an unknown kind", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  const bad = [{ kind: "person", id: "" }, { kind: "person", id: "  " }, { kind: "robot", id: "r1" }] as never[];
+  for (const actor of bad) {
+    await expect(record.recordContribution({ about: "person:pat", content: "x", actor })).rejects.toThrow(/actor/);
+    await expect(record.recordObservations({
+      source: "office-visit", classify, reconcile: recordAll,
+      observations: [
+        { about: ["person:pat"], predicate: "fine", value: "first", actor: { kind: "agent", id: "a1" } },
+        { about: ["person:pat"], predicate: "bad", value: "second", actor },
+      ],
+    })).rejects.toThrow(/actor/);
+    await expect(store.retire({ id: "any", actor, reason: "r" })).rejects.toThrow(/actor/);
+  }
+  // nothing was written, not even the batch's valid first observation
+  expect(await handle.db.select().from(handle.tables.contribution)).toEqual([]);
+  expect(await handle.db.select().from(handle.tables.observation)).toEqual([]);
+});
