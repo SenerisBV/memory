@@ -137,3 +137,15 @@ describe("privateScope", () => {
     expect((await store.listContributions({ about: ["carrier:x"] })).length).toBe(3);
   });
 });
+
+test("a note with an empty why has no why line in the projection", async () => {
+  const host = fakeHost();
+  const store = createStore(handle, host);
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await store.insertContribution({ subjectKey: "person:ann", content: "no reason given", why: "", source: "contribution", principalId: null, ts: new Date() });
+  await store.insertContribution({ subjectKey: "person:ann", content: "with a reason", why: "said so", source: "contribution", principalId: null, ts: new Date() });
+  const md = (await createProject(host, store).projectDossier("person:ann"))!;
+  expect(md).toContain("why: said so");
+  expect(md).not.toContain("why: \n");
+  expect(md.match(/why:/g)?.length).toBe(1);
+});

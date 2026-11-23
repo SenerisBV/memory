@@ -39,7 +39,7 @@ export function createProject(host: MemoryHost, store: Store) {
     }
     if (contributions.length > 0) {
       lines.push("## Contributions (deliberate)", "");
-      for (const c of contributions) lines.push(`- **${fmt(c.ts)}** — ${c.content}  \n  ↳ why: ${c.why}`);
+      for (const c of contributions) lines.push(`- **${fmt(c.ts)}** — ${c.content}${c.why ? `  \n  ↳ why: ${c.why}` : ""}`);
       lines.push("");
     }
     return lines.join("\n");

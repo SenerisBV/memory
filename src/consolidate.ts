@@ -150,7 +150,7 @@ export function createConsolidate(host: MemoryHost, store: Store) {
 
     const priorBody = await readDossier(s);
     const evidenceBlock = renderEvidenceBlock(rows.map((r) => ({ authorAgent: r.authorAgent, source: r.source, sourceGrade: r.sourceGrade, label: s.label, predicate: r.predicate, value: r.value })));
-    const contribBlock = contributions.map((c) => `- [${c.authorAgent}] ${c.content} — why: ${c.why}`).join("\n");
+    const contribBlock = contributions.map((c) => `- [${c.authorAgent}] ${c.content}${c.why ? ` — why: ${c.why}` : ""}`).join("\n");
     const userMsg = [
       `Subject: ${s.label}`, "",
       ...(isComposite ? ["Members:", memberDossiers.join("\n\n") || "(none synthesized yet)", ""] : []),

@@ -300,3 +300,19 @@ describe("privateSubjectTypes: observations and composites", () => {
     expect(g).not.toContain("practice dossier");
   });
 });
+
+test("a note with an empty why has no why suffix in the synthesis prompt", async () => {
+  const host = fakeHost();
+  const store = createStore(handle, host);
+  await store.getOrCreateSubject("person:ann", "Ann");
+  // newest first: the empty-why note is the first line, so a newline follows it
+  await store.insertContribution({ subjectKey: "person:ann", content: "no reason given", why: "", source: "contribution", principalId: null, ts: new Date(Date.now()) });
+  await store.insertContribution({ subjectKey: "person:ann", content: "with a reason", why: "said so", source: "contribution", principalId: null, ts: new Date(Date.now() - 60_000) });
+  await store.markDirty(["person:ann"]);
+  const { fn, calls } = fakeComplete(["## Model\n\nok\n"]);
+  await createConsolidate(host, store).consolidate({ synth: fn, minObs: 1 });
+  const p = calls[0]!.messages[0]!.content;
+  expect(p).toContain("no reason given\n");
+  expect(p).toContain("with a reason — why: said so");
+  expect(p.match(/why:/g)?.length).toBe(1);
+});

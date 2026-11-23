@@ -436,3 +436,14 @@ test("re-observing a natural key: an actor replaces the actor, no actor keeps it
   expect((await at({ kind: "agent", id: "B" })).id).toBe(a.id);
   expect(await read()).toEqual([["agent", "B", null]]);
 });
+
+test("listContributions breaks a ts tie by id DESC and clamps limit to 1..500", async () => {
+  const ts = new Date(2026, 0, 5);
+  const ids = ["c-b", "c-c", "c-a"];
+  for (const id of ids) await handle.db.insert(handle.tables.contribution).values({ id, authorAgent: "a", subjectKey: "pursuit:t", about: ["pursuit:t"], content: id, why: "", ts });
+  expect((await store.listContributions({ about: ["pursuit:t"] })).map((r) => r.id)).toEqual(["c-c", "c-b", "c-a"]);
+  expect((await store.listContributions({ about: ["pursuit:t"], limit: 0 })).length).toBe(1);
+  expect((await store.listContributions({ about: ["pursuit:t"], limit: -5 })).length).toBe(1);
+  await handle.db.insert(handle.tables.contribution).values(Array.from({ length: 510 }, (_, i) => ({ authorAgent: "a", subjectKey: "pursuit:t", about: ["pursuit:t"], content: `n${i}`, why: "", ts })));
+  expect((await store.listContributions({ about: ["pursuit:t"], limit: 10_000 })).length).toBe(500);
+});

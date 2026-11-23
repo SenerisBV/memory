@@ -239,7 +239,13 @@ export function createStore(handle: Handle, host: MemoryHost) {
       .from(contribution).where(and(arrayOverlaps(contribution.about, [key]), isNull(contribution.retiredAt), notPrivate)).orderBy(desc(contribution.ts)).limit(limit);
   }
 
-  /** Live notes whose `about` overlaps `about`, newest first, each once.
+  /** Default 200, clamped to 1..500 (a non-number reads as the default). */
+  function clampListLimit(limit: number | undefined): number {
+    if (limit === undefined || !Number.isFinite(limit)) return 200;
+    return Math.min(500, Math.max(1, Math.floor(limit)));
+  }
+
+  /** Live notes whose `about` overlaps `about`, newest first (ties by id), each once.
    *  With `host.privateSubjectTypes`, a note about a private subject is left out
    *  unless that subject is one of `about` or `privateScope`. */
   async function listContributions(opts: { about: string[]; limit?: number; privateScope?: string[] }): Promise<ContributionRow[]> {
@@ -247,7 +253,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
     const rows = await db.select().from(contribution)
       .where(and(arrayOverlaps(contribution.about, opts.about), isNull(contribution.retiredAt),
         privateSubjectCondition(contribution.about, host.privateSubjectTypes, [...opts.about, ...(opts.privateScope ?? [])])))
-      .orderBy(desc(contribution.ts), desc(contribution.createdAt)).limit(opts.limit ?? 200);
+      .orderBy(desc(contribution.ts), desc(contribution.id)).limit(clampListLimit(opts.limit));
     return rows.map((r) => ({
       id: r.id, about: r.about, content: r.content, why: r.why, ts: r.ts,
       actor: r.actorKind ? { kind: r.actorKind as Actor["kind"], id: r.actorId ?? "", ...(r.actorLabel ? { label: r.actorLabel } : {}) } : null,

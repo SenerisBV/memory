@@ -189,7 +189,8 @@ await memory.contribute({ about: "person:someone", content: "Prefers calls after
 // returns { id }, and `record` accepts the same `actor`. Both are optional.
 const { id } = await memory.contribute({ about: ["person:someone", "pursuit:a-trip"], content: "Wants the trip in June.", why: "said so", actor: { kind: "person", id: "u1", label: "Una" } });
 
-// The live notes about any of the listed subjects, newest first, each once (`limit` defaults to 200).
+// The live notes about any of the listed subjects, newest first, each once (`limit` defaults to 200,
+// clamped to 1..500).
 // Each row is { id, about, content, why, actor, ts }; `actor` is null when none was recorded.
 // Takes `privateScope` (see "Keeping private notes out of shared dossiers").
 const notes = await memory.listContributions({ about: ["person:someone", "pursuit:a-trip"] });
