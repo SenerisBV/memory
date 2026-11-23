@@ -106,7 +106,7 @@ export function createConsolidate(host: MemoryHost, store: Store) {
     // fleetOnly: a dossier is read by every agent, so it may only be built
     // from rows every agent may read.
     const rows = await store.evidence(s.key, { fleetOnly: true, limit: MAX_OBS_PER_SYNTH });
-    const contributions = await store.contributions(s.key, 50);
+    const contributions = await store.contributions(s.key, 50, { excludePrivateTypes: host.privateSubjectTypes });
     const memberDossiers: string[] = [];
     if (isComposite) {
       for (const m of s.members) {

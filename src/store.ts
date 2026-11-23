@@ -12,6 +12,10 @@ export interface SubjectRow {
   profileDirty: boolean; dirtyGen: number; profilePath: string | null; profileSynthAt: Date | null;
 }
 
+export interface ContributionRow {
+  id: string; about: string[]; content: string; why: string; actor: Actor | null; ts: Date;
+}
+
 export interface LiveRow {
   id: string; subjectKey: string; about: string[]; predicate: string; value: string;
   valueNum: number | null; unit: string | null; ts: Date; authorAgent: string; visibility: string;
@@ -207,9 +211,26 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return row ?? null;
   }
 
-  async function contributions(key: string, limit: number) {
+  /** `excludePrivateTypes`: drop a note that is also about a subject of one of these
+   *  types (other than `key` itself), so a private note stays out of a shared dossier. */
+  async function contributions(key: string, limit: number, opts: { excludePrivateTypes?: string[] } = {}) {
+    const priv = opts.excludePrivateTypes ?? [];
+    const notPrivate = priv.length === 0 ? undefined
+      : sql`NOT EXISTS (SELECT 1 FROM unnest(${contribution.about}) AS a WHERE a <> ${key} AND split_part(a, ':', 1) = ANY(${sql`ARRAY[${sql.join(priv.map((t) => sql`${t}`), sql`, `)}]::text[]`}))`;
     return db.select({ authorAgent: contribution.authorAgent, content: contribution.content, why: contribution.why, ts: contribution.ts })
-      .from(contribution).where(and(arrayOverlaps(contribution.about, [key]), isNull(contribution.retiredAt))).orderBy(desc(contribution.ts)).limit(limit);
+      .from(contribution).where(and(arrayOverlaps(contribution.about, [key]), isNull(contribution.retiredAt), notPrivate)).orderBy(desc(contribution.ts)).limit(limit);
+  }
+
+  /** Live notes whose `about` overlaps `about`, newest first, each once. */
+  async function listContributions(opts: { about: string[]; limit?: number }): Promise<ContributionRow[]> {
+    if (opts.about.length === 0) return [];
+    const rows = await db.select().from(contribution)
+      .where(and(arrayOverlaps(contribution.about, opts.about), isNull(contribution.retiredAt)))
+      .orderBy(desc(contribution.ts), desc(contribution.createdAt)).limit(opts.limit ?? 200);
+    return rows.map((r) => ({
+      id: r.id, about: r.about, content: r.content, why: r.why, ts: r.ts,
+      actor: r.actorKind ? { kind: r.actorKind as Actor["kind"], id: r.actorId ?? "", ...(r.actorLabel ? { label: r.actorLabel } : {}) } : null,
+    }));
   }
 
   /** Writes one observation, upserting when the caller supplied a natural key.
@@ -366,7 +387,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
   return {
     getSubject, getOrCreateSubject, knownSubjects, recentlyActive, findSubjectByLabel, setMembers, markDirty,
     dirtySubjects, setProfile, subjectByProfilePath,
-    resolveLocalKey, putAlias, liveRowsAbout, evidence, contributions, insertObservation, supersede,
+    resolveLocalKey, putAlias, liveRowsAbout, evidence, contributions, listContributions, insertObservation, supersede,
     insertContribution, retire, reapSuperseded, lastWriteByAuthor, lastConsolidateAt,
   };
 }

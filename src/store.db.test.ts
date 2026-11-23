@@ -398,3 +398,27 @@ test("retiring an observation releases its natural key, so a re-observation is a
   const [old] = await handle.db.select().from(handle.tables.observation).where(eq(handle.tables.observation.id, a.id));
   expect(old?.retiredAt).toBeInstanceOf(Date);
 });
+
+const note = (about: string[], content: string, ts = new Date(), actor?: { kind: "person" | "agent"; id: string; label?: string }) =>
+  store.insertContribution({ subjectKey: about[0]!, about, content, why: "w", source: "contribution", principalId: null, ts, actorKind: actor?.kind, actorId: actor?.id, actorLabel: actor?.label });
+
+test("listContributions returns a note about two listed subjects once", async () => {
+  await note(["pursuit:a", "pursuit:b"], "both", new Date(2026, 0, 2), { kind: "person", id: "u1", label: "Una" });
+  await note(["pursuit:a"], "only a", new Date(2026, 0, 3));
+  await note(["pursuit:c"], "unrelated", new Date(2026, 0, 4));
+  const rows = await store.listContributions({ about: ["pursuit:a", "pursuit:b"] });
+  expect(rows.map((r) => r.content)).toEqual(["only a", "both"]);
+  expect(rows[1]!.about).toEqual(["pursuit:a", "pursuit:b"]);
+  expect(rows[1]!.actor).toEqual({ kind: "person", id: "u1", label: "Una" });
+  expect(rows[0]!.actor).toBeNull();
+  expect(rows[0]!.why).toBe("w");
+  expect((await store.listContributions({ about: ["pursuit:a", "pursuit:b"], limit: 1 })).length).toBe(1);
+});
+
+test("listContributions excludes retired notes", async () => {
+  const keep = await note(["pursuit:a"], "keep");
+  const gone = await note(["pursuit:a"], "gone");
+  await store.retire({ id: gone.id, actor: person, reason: "wrong" });
+  const rows = await store.listContributions({ about: ["pursuit:a"] });
+  expect(rows.map((r) => r.id)).toEqual([keep.id]);
+});

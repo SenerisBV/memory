@@ -100,6 +100,7 @@ interface MemoryHost {
   lens?: Lens;            // optional: filter a recalled body, or replace the extraction prompt
   supersededRetentionDays?: number | null; // days a superseded row is kept before consolidate() reaps it;
                                            // absent = 30, null = never reap (reaped is always 0)
+  privateSubjectTypes?: string[]; // subject types whose notes stay out of other subjects' dossiers (see below)
 }
 ```
 
@@ -183,6 +184,18 @@ is not `host.synthesizer`, it throws instead of writing. Several agents can
 // A free-text note about one subject, kept beside the observations rather than
 // reconciled into them. It shows up in `project` and in the evidence for the next dossier.
 await memory.contribute({ about: "person:someone", content: "Prefers calls after 6pm.", why: "said so twice" });
+// `about` may also be a list, so one note is evidence for several subjects at once. Pass `actor`
+// ({ kind: "person" | "agent", id, label? }) to record who is behind a write; `contribute`
+// returns { id }, and `record` accepts the same `actor`. Both are optional.
+const { id } = await memory.contribute({ about: ["person:someone", "pursuit:a-trip"], content: "Wants the trip in June.", why: "said so", actor: { kind: "person", id: "u1", label: "Una" } });
+
+// The live notes about any of the listed subjects, newest first, each once (`limit` defaults to 200).
+// Each row is { id, about, content, why, actor, ts }; `actor` is null when none was recorded.
+const notes = await memory.listContributions({ about: ["person:someone", "pursuit:a-trip"] });
+
+// Retire a note or an observation by id. The row is kept, marked retired, and every read stops
+// returning it. Returns false if the id is unknown or already retired.
+await memory.retire({ id, actor: { kind: "person", id: "u1" }, reason: "no longer true" });
 
 // The full readable evidence for a subject, or null if there's nothing.
 // `limit` raises the evidence cap for this call (useful when diffing two stores).
@@ -201,6 +214,13 @@ await memory.subjects.resolveLocalKey("cust-4411");           // "person:someone
 
 `recall` takes `{ name, intro, priority?, maxChars? }` and returns a
 prompt-section-shaped object; `maxChars` caps the body.
+
+### Keeping private notes out of shared dossiers
+
+Set `privateSubjectTypes: ["practice"]` on the host and a note about both `carrier:x` and
+`practice:a` is left out of `carrier:x`'s evidence when it is consolidated, because a dossier is
+read by everyone. The same note still goes into `practice:a`'s dossier, and `listContributions`
+still returns it. With no `privateSubjectTypes`, nothing is excluded.
 
 ### Who can read what
 
