@@ -387,3 +387,14 @@ test("reapSuperseded does not delete retired rows", async () => {
   expect(await store.reapSuperseded(new Date())).toBe(0);
   expect((await handle.db.select().from(handle.tables.observation).where(eq(handle.tables.observation.id, o.id))).length).toBe(1);
 });
+
+test("retiring an observation releases its natural key, so a re-observation is a new live row", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const a = await store.insertObservation({ ...retireObs("v1"), naturalKey: "nk" });
+  expect(await store.retire({ id: a.id, actor: person, reason: "wrong" })).toBe(true);
+  const b = await store.insertObservation({ ...retireObs("v2"), naturalKey: "nk" });
+  expect(b.id).not.toBe(a.id);
+  expect((await store.evidence("person:ann", { fleetOnly: false, limit: 10 })).map((r) => [r.id, r.value])).toEqual([[b.id, "v2"]]);
+  const [old] = await handle.db.select().from(handle.tables.observation).where(eq(handle.tables.observation.id, a.id));
+  expect(old?.retiredAt).toBeInstanceOf(Date);
+});

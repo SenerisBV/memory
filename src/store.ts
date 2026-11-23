@@ -3,6 +3,7 @@ import { and, arrayOverlaps, asc, desc, eq, inArray, isNull, lt, max, ne, or, sq
 import { ATTENTION, KNOWN_SUBJECTS_CAP, SUPERSEDED_RETENTION_DAYS } from "./constants";
 import type { Handle } from "./db";
 import type { MemoryHost } from "./host";
+import type { Actor } from "./extract";
 import { assertDeclaredKey } from "./registry";
 import type { Tables } from "./schema";
 
@@ -120,11 +121,11 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return { profileDirty: true, dirtyGen: sql`${subject.dirtyGen} + 1` };
   }
 
-  async function markDirty(keys: string[]): Promise<void> {
+  async function markDirty(keys: string[], conn: Pick<typeof db, "update"> = db): Promise<void> {
     if (keys.length === 0) return;
-    await db.update(subject).set(dirty()).where(inArray(subject.key, keys));
+    await conn.update(subject).set(dirty()).where(inArray(subject.key, keys));
     // A member's write dirties every composite that lists it.
-    await db.update(subject).set(dirty()).where(arrayOverlaps(subject.members, keys));
+    await conn.update(subject).set(dirty()).where(arrayOverlaps(subject.members, keys));
   }
 
   /** Every subject a consolidation pass should look at: dirty, and not
@@ -277,15 +278,19 @@ export function createStore(handle: Handle, host: MemoryHost) {
    *  A retired observation also releases its natural key (as a supersede
    *  tombstone does), so a later re-observation inserts a fresh live row
    *  instead of upserting into the retired one and vanishing. */
-  async function retire(opts: { id: string; actor: { kind: string; id: string }; reason: string }): Promise<boolean> {
+  async function retire(opts: { id: string; actor: Actor; reason: string }): Promise<boolean> {
     const mark = { retiredAt: new Date(), retiredByKind: opts.actor.kind, retiredById: opts.actor.id, retiredReason: opts.reason };
-    const [c] = await db.update(contribution).set(mark)
-      .where(and(eq(contribution.id, opts.id), isNull(contribution.retiredAt))).returning({ about: contribution.about });
-    if (c) { await markDirty(c.about); return true; }
-    const [o] = await db.update(observation).set({ ...mark, naturalKey: null })
-      .where(and(eq(observation.id, opts.id), isNull(observation.retiredAt))).returning({ about: observation.about });
-    if (o) { await markDirty(o.about); return true; }
-    return false;
+    // One transaction: a failed markDirty must not leave a row retired
+    // while its subjects' dossiers still read as current.
+    return db.transaction(async (tx) => {
+      const [c] = await tx.update(contribution).set(mark)
+        .where(and(eq(contribution.id, opts.id), isNull(contribution.retiredAt))).returning({ about: contribution.about });
+      if (c) { await markDirty(c.about, tx); return true; }
+      const [o] = await tx.update(observation).set({ ...mark, naturalKey: null })
+        .where(and(eq(observation.id, opts.id), isNull(observation.retiredAt))).returning({ about: observation.about });
+      if (o) { await markDirty(o.about, tx); return true; }
+      return false;
+    });
   }
 
   /** The two reads health() is built on.
