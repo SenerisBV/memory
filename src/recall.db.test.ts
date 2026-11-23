@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -6,6 +6,7 @@ import { handle, resetDb } from "../tests/setup";
 import { fakeHost } from "../tests/fakes";
 import { createProject } from "./project";
 import { createRecall } from "./recall";
+import { DEFAULT_REGISTRY } from "./registry";
 import { createStore } from "./store";
 
 beforeEach(resetDb);
@@ -80,4 +81,71 @@ test("recall prefers the synthesized file, falls back to projection, honours ign
   await handle.db.update(handle.tables.subject).set({ attention: "ignore" });
   expect(await recall.recall("person:ann", { name: "n", intro: "i" })).toBeNull();
   expect(host.events.at(-1)?.payload?.outcome).toBe("ignored");
+});
+
+describe("privateScope", () => {
+  const registry = { ...DEFAULT_REGISTRY, subjectTypes: [...DEFAULT_REGISTRY.subjectTypes,
+    { name: "carrier", gloss: "a payer", mintedBy: "host" as const, composite: false },
+    { name: "practice", gloss: "a practice", mintedBy: "host" as const, composite: false }] };
+  const setup = async (over: { privateSubjectTypes?: string[] } = { privateSubjectTypes: ["practice"] }) => {
+    const host = fakeHost({ registry, ...over });
+    const store = createStore(handle, host);
+    for (const [k, l] of [["carrier:x", "X"], ["practice:a", "A"], ["practice:b", "B"]] as const) await store.getOrCreateSubject(k, l);
+    const note = (about: string[], content: string) => store.insertContribution({ subjectKey: about[0]!, about, content, why: "w", source: "contribution", principalId: null, ts: new Date() });
+    await note(["carrier:x"], "shared note");
+    await note(["carrier:x", "practice:a"], "note of a");
+    await note(["carrier:x", "practice:b"], "note of b");
+    await store.insertObservation({ ...obs("carrier:x", "denies", "obs of a", new Date()), about: ["carrier:x", "practice:a"] });
+    return { host, store, recall: createRecall(host, store).recall, project: createProject(host, store).projectDossier };
+  };
+
+  test("recall without a scope leaves out notes and observations about a private subject", async () => {
+    const { recall } = await setup();
+    const body = (await recall("carrier:x", { name: "n", intro: "i" }))!.body;
+    expect(body).toContain("shared note");
+    expect(body).not.toContain("note of a");
+    expect(body).not.toContain("obs of a");
+  });
+  test("recall with privateScope: [practice:a] includes a's note and observation, not b's", async () => {
+    const { recall } = await setup();
+    const body = (await recall("carrier:x", { name: "n", intro: "i", privateScope: ["practice:a"] }))!.body;
+    expect(body).toContain("note of a");
+    expect(body).toContain("obs of a");
+    expect(body).not.toContain("note of b");
+  });
+  test("project takes the same scope", async () => {
+    const { project } = await setup();
+    expect(await project("carrier:x")).not.toContain("note of a");
+    expect(await project("carrier:x", { privateScope: ["practice:a"] })).toContain("note of a");
+  });
+  test("the private subject itself sees its own notes without a scope", async () => {
+    const { project } = await setup();
+    const md = (await project("practice:a"))!;
+    expect(md).toContain("note of a");
+    expect(md).toContain("obs of a");
+  });
+  test("listContributions with privateScope: [practice:a] includes a's note and excludes b's", async () => {
+    const { store } = await setup();
+    const rows = await store.listContributions({ about: ["carrier:x"], privateScope: ["practice:a"] });
+    expect(rows.map((r) => r.content).sort()).toEqual(["note of a", "shared note"]);
+    expect((await store.listContributions({ about: ["carrier:x"] })).map((r) => r.content)).toEqual(["shared note"]);
+  });
+  test("with no privateSubjectTypes, nothing is excluded", async () => {
+    const { recall, store } = await setup({});
+    const body = (await recall("carrier:x", { name: "n", intro: "i" }))!.body;
+    for (const t of ["shared note", "note of a", "note of b", "obs of a"]) expect(body).toContain(t);
+    expect((await store.listContributions({ about: ["carrier:x"] })).length).toBe(3);
+  });
+});
+
+test("a note with an empty why has no why line in the projection", async () => {
+  const host = fakeHost();
+  const store = createStore(handle, host);
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await store.insertContribution({ subjectKey: "person:ann", content: "no reason given", why: "", source: "contribution", principalId: null, ts: new Date() });
+  await store.insertContribution({ subjectKey: "person:ann", content: "with a reason", why: "said so", source: "contribution", principalId: null, ts: new Date() });
+  const md = (await createProject(host, store).projectDossier("person:ann"))!;
+  expect(md).toContain("why: said so");
+  expect(md).not.toContain("why: \n");
+  expect(md.match(/why:/g)?.length).toBe(1);
 });

@@ -83,7 +83,9 @@ export function createRecall(host: MemoryHost, store: Store) {
 
   async function recall(
     key: string,
-    opts: { name: string; intro: string; priority?: number; maxChars?: number },
+    // privateScope: passed to the projection (project.ts). A synthesized
+    // dossier never carries another subject's private rows to begin with.
+    opts: { name: string; intro: string; priority?: number; maxChars?: number; privateScope?: string[] },
   ): Promise<RecallSection | null> {
     const maxChars = opts.maxChars ?? RECALL_MAX_CHARS;
     // profileSynthAt is selected purely for the log line. It is written by
@@ -113,7 +115,7 @@ export function createRecall(host: MemoryHost, store: Store) {
       } catch { body = ""; }
     }
     if (!body) {
-      const projected = await projectDossier(key);
+      const projected = await projectDossier(key, { privateScope: opts.privateScope });
       body = projected ? stripLeadingH1(projected).trim() : "";
     }
     if (!body) {

@@ -103,3 +103,9 @@ test("calibrate writes a prediction outcome as an ordinary observation", async (
     await m.close();
   }
 });
+
+test("createMemory throws when a privateSubjectTypes entry is not a registry type", () => {
+  expect(() => createMemory(fakeHost({ privateSubjectTypes: ["practise"] }))).toThrow(/privateSubjectTypes.*"practise"/);
+  const m = createMemory(fakeHost({ privateSubjectTypes: ["person"] }));
+  return m.close();
+});

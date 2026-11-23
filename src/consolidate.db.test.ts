@@ -1,10 +1,11 @@
-import { beforeEach, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { handle, resetDb } from "../tests/setup";
 import { fakeComplete, fakeHost } from "../tests/fakes";
 import { createConsolidate, type SynthFn } from "./consolidate";
+import { DEFAULT_REGISTRY } from "./registry";
 import { subjectFile } from "./keys";
 import { createStore } from "./store";
 
@@ -211,4 +212,107 @@ test("two keys whose slugs collide do not overwrite each other's dossier", async
   expect((await store.getSubject(k2))?.profileDirty).toBe(true); // left dirty, nothing written
   expect((await store.getSubject(k2))?.profilePath).toBeNull();
   expect(readFileSync(join(host.dossierRoot, subjectFile(k1)), "utf8")).toContain("One.");
+});
+
+describe("privateSubjectTypes", () => {
+  const registry = { ...DEFAULT_REGISTRY, subjectTypes: [...DEFAULT_REGISTRY.subjectTypes,
+    { name: "carrier", gloss: "a payer", mintedBy: "host" as const, composite: false },
+    { name: "practice", gloss: "a practice", mintedBy: "host" as const, composite: false }] };
+  const setup = async (over: { privateSubjectTypes?: string[] }) => {
+    const host = fakeHost({ registry, ...over });
+    const store = createStore(handle, host);
+    await store.getOrCreateSubject("carrier:x", "X");
+    await store.getOrCreateSubject("practice:a", "A");
+    const c = (about: string[], content: string) => store.insertContribution({ subjectKey: about[0]!, about, content, why: "w", source: "contribution", principalId: null, ts: new Date() });
+    await c(["carrier:x"], "shared note");
+    await c(["carrier:x", "practice:a"], "practice-private note");
+    await store.markDirty(["carrier:x", "practice:a"]);
+    return { host, store };
+  };
+  const prompt = async (key: string, over: { privateSubjectTypes?: string[] }) => {
+    const { host, store } = await setup(over);
+    const { fn, calls } = fakeComplete(["## Model\n\nok\n", "## Model\n\nok\n"]);
+    await createConsolidate(host, store).consolidate({ synth: fn, minObs: 1 });
+    return calls.map((x) => x.messages[0]!.content).find((m) => m.startsWith(`Subject: ${key === "carrier:x" ? "X" : "A"}\n`))!;
+  };
+
+  test("consolidating carrier:x skips a note that is also about practice:a when practice is a private type", async () => {
+    const p = await prompt("carrier:x", { privateSubjectTypes: ["practice"] });
+    expect(p).toContain("shared note");
+    expect(p).not.toContain("practice-private note");
+  });
+  test("consolidating practice:a includes that note", async () => {
+    const p = await prompt("practice:a", { privateSubjectTypes: ["practice"] });
+    expect(p).toContain("practice-private note");
+  });
+  test("with no privateSubjectTypes, consolidation is unchanged", async () => {
+    const p = await prompt("carrier:x", {});
+    expect(p).toContain("shared note");
+    expect(p).toContain("practice-private note");
+  });
+});
+
+describe("privateSubjectTypes: observations and composites", () => {
+  const registry = { ...DEFAULT_REGISTRY, subjectTypes: [...DEFAULT_REGISTRY.subjectTypes,
+    { name: "carrier", gloss: "a payer", mintedBy: "host" as const, composite: false },
+    { name: "practice", gloss: "a practice", mintedBy: "host" as const, composite: false }] };
+  const prompt = async (key: string, over: { privateSubjectTypes?: string[] }) => {
+    const host = fakeHost({ registry, ...over });
+    const store = createStore(handle, host);
+    await store.getOrCreateSubject("carrier:x", "X");
+    await store.getOrCreateSubject("practice:a", "A");
+    await store.insertObservation(obs("carrier:x", ["carrier:x"], "pays", "shared obs"));
+    await store.insertObservation(obs("carrier:x", ["carrier:x", "practice:a"], "denies", "practice-private obs"));
+    await store.markDirty(["carrier:x", "practice:a"]);
+    const { fn, calls } = fakeComplete(["## Model\n\nok\n", "## Model\n\nok\n"]);
+    await createConsolidate(host, store).consolidate({ synth: fn, minObs: 1 });
+    return calls.map((x) => x.messages[0]!.content).find((m) => m.startsWith(`Subject: ${key === "carrier:x" ? "X" : "A"}\n`))!;
+  };
+
+  test("consolidating carrier:x skips an observation that is also about practice:a", async () => {
+    const p = await prompt("carrier:x", { privateSubjectTypes: ["practice"] });
+    expect(p).toContain("shared obs");
+    expect(p).not.toContain("practice-private obs");
+  });
+  test("consolidating practice:a includes that observation", async () => {
+    const p = await prompt("practice:a", { privateSubjectTypes: ["practice"] });
+    expect(p).toContain("practice-private obs");
+  });
+  test("with no privateSubjectTypes, observations are unchanged", async () => {
+    const p = await prompt("carrier:x", {});
+    expect(p).toContain("shared obs");
+    expect(p).toContain("practice-private obs");
+  });
+  test("a composite that is not a private type skips a member that is", async () => {
+    const host = fakeHost({ registry, privateSubjectTypes: ["practice"] });
+    const store = createStore(handle, host);
+    await store.getOrCreateSubject("carrier:x", "X");
+    await store.getOrCreateSubject("practice:a", "A");
+    await store.getOrCreateSubject("group:g", "G");
+    await store.setMembers("group:g", ["carrier:x", "practice:a"]);
+    await store.insertObservation(obs("carrier:x", ["carrier:x"], "pays", "shared obs"));
+    await store.insertObservation(obs("practice:a", ["practice:a"], "bills", "own obs"));
+    await store.markDirty(["carrier:x", "practice:a", "group:g"]);
+    const { fn, calls } = fakeComplete(["## Model\n\ncarrier dossier\n", "## Model\n\npractice dossier\n", "## Model\n\ngroup dossier\n"]);
+    await createConsolidate(host, store).consolidate({ synth: fn, minObs: 1 });
+    const g = calls.map((x) => x.messages[0]!.content).find((m) => m.startsWith("Subject: G\n"))!;
+    expect(g).toContain("carrier dossier");
+    expect(g).not.toContain("practice dossier");
+  });
+});
+
+test("a note with an empty why has no why suffix in the synthesis prompt", async () => {
+  const host = fakeHost();
+  const store = createStore(handle, host);
+  await store.getOrCreateSubject("person:ann", "Ann");
+  // newest first: the empty-why note is the first line, so a newline follows it
+  await store.insertContribution({ subjectKey: "person:ann", content: "no reason given", why: "", source: "contribution", principalId: null, ts: new Date(Date.now()) });
+  await store.insertContribution({ subjectKey: "person:ann", content: "with a reason", why: "said so", source: "contribution", principalId: null, ts: new Date(Date.now() - 60_000) });
+  await store.markDirty(["person:ann"]);
+  const { fn, calls } = fakeComplete(["## Model\n\nok\n"]);
+  await createConsolidate(host, store).consolidate({ synth: fn, minObs: 1 });
+  const p = calls[0]!.messages[0]!.content;
+  expect(p).toContain("no reason given\n");
+  expect(p).toContain("with a reason — why: said so");
+  expect(p.match(/why:/g)?.length).toBe(1);
 });

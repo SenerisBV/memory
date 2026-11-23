@@ -194,8 +194,8 @@ export async function adoptLegacyStore(opts: {
         RETURNING id`);
       aliasesSkipped = before.aliases - aliasRows.rows.length;
 
-      await run(`INSERT INTO ${N("Contribution")} (id, "authorAgent", "subjectKey", "principalId", content, why, source, ts, "createdAt")
-        SELECT c.id, c."authorAgent", m.new, c."principalId", c.content, c.why, c.source, c.ts, c."createdAt"
+      await run(`INSERT INTO ${N("Contribution")} (id, "authorAgent", "subjectKey", about, "principalId", content, why, source, ts, "createdAt")
+        SELECT c.id, c."authorAgent", m.new, ARRAY[m.new], c."principalId", c.content, c.why, c.source, c.ts, c."createdAt"
         FROM ${L("MemoryContribution")} c JOIN (VALUES ${mapValues}) AS m(old, new) ON m.old = c."canonicalKey"`);
 
       if (opts.duplicates) {

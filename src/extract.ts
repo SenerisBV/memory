@@ -4,6 +4,20 @@ import type { Store } from "./store";
 
 export type AboutEntry = string | { type: string; label: string };
 
+/** Who a write is on behalf of. Optional everywhere; `authorAgent` stays the host. */
+export type Actor = { kind: "person" | "agent"; id: string; label?: string };
+
+/** Throws unless `actor` is a person or an agent with a non-blank id. A host
+ *  that passes `{ id: "" }` or a made-up kind would otherwise store an actor
+ *  nobody can be traced to. `where` names the caller in the message. */
+export function assertActor(actor: unknown, where: string): asserts actor is Actor {
+  const a = actor as { kind?: unknown; id?: unknown } | null;
+  if (!a || typeof a !== "object" || (a.kind !== "person" && a.kind !== "agent")) {
+    throw new Error(`${where}: actor.kind must be "person" or "agent"`);
+  }
+  if (typeof a.id !== "string" || !a.id.trim()) throw new Error(`${where}: actor.id must be a non-empty string`);
+}
+
 export interface ObservationInput {
   about: AboutEntry[];
   predicate: string;
@@ -13,6 +27,7 @@ export interface ObservationInput {
   naturalKey?: string | null;
   /** Grade the extractor proposes; clamped to the source ceiling at write time. */
   grade?: string;
+  actor?: Actor;
 }
 
 function isAboutEntry(x: unknown): x is AboutEntry {

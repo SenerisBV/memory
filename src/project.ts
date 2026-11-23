@@ -17,12 +17,17 @@ export function createProject(host: MemoryHost, store: Store) {
    *
    *  The contributions cap is deliberately NOT parameterised. It is not what
    *  the audit was blind to (46 contributions, cap 50), and one knob that is
-   *  actually used is worth more than two that are half-used. */
-  async function projectDossier(key: string, opts: { limit?: number } = {}): Promise<string | null> {
+   *  actually used is worth more than two that are half-used.
+   *
+   *  `opts.privateScope`: with `host.privateSubjectTypes`, a row about a
+   *  private subject other than `key` is left out unless that subject is listed
+   *  here (the private subjects the reader is entitled to, e.g. the reader's own). */
+  async function projectDossier(key: string, opts: { limit?: number; privateScope?: string[] } = {}): Promise<string | null> {
+    const priv = { excludePrivateTypes: host.privateSubjectTypes, privateScope: opts.privateScope };
     const [subject, observations, contributions] = await Promise.all([
       store.getSubject(key),
-      store.evidence(key, { fleetOnly: false, limit: opts.limit ?? PROJECTION_LIMIT }),
-      store.contributions(key, 50),
+      store.evidence(key, { fleetOnly: false, limit: opts.limit ?? PROJECTION_LIMIT, ...priv }),
+      store.contributions(key, 50, priv),
     ]);
     if (!subject || (observations.length === 0 && contributions.length === 0)) return null;
     const fmt = (d: Date) => d.toISOString().slice(0, 16).replace("T", " ");
@@ -34,7 +39,7 @@ export function createProject(host: MemoryHost, store: Store) {
     }
     if (contributions.length > 0) {
       lines.push("## Contributions (deliberate)", "");
-      for (const c of contributions) lines.push(`- **${fmt(c.ts)}** — ${c.content}  \n  ↳ why: ${c.why}`);
+      for (const c of contributions) lines.push(`- **${fmt(c.ts)}** — ${c.content}${c.why ? `  \n  ↳ why: ${c.why}` : ""}`);
       lines.push("");
     }
     return lines.join("\n");

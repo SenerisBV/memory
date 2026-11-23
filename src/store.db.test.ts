@@ -306,3 +306,144 @@ test("recentlyActive counts a live row that is only ABOUT the subject, and ignor
   expect(r[0]!.lastEvidenceAt.getTime()).toBe(now - day);
   expect(r[1]!.lastEvidenceAt.getTime()).toBe(now - 20 * day);
 });
+
+const retireObs = (value: string) => ({ subjectKey: "person:ann", about: ["person:ann"], predicate: "p", value, source: "test", sourceGrade: "C3", naturalKey: null, visibility: "fleet", kind: "general", topics: ["general"], ts: new Date(), valueNum: null, unit: null, provenancePath: null });
+const person = { kind: "person" as const, id: "u1" };
+
+test("retire hides a contribution from project, recall and contributions, and keeps the row", async () => {
+  const { createProject } = await import("./project");
+  const { createRecall } = await import("./recall");
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await store.getOrCreateSubject("pursuit:a", "A");
+  await store.getOrCreateSubject("pursuit:b", "B");
+  const keep = await store.insertContribution({ subjectKey: "person:ann", content: "keep me", why: "w", source: "contribution", principalId: null, ts: new Date() });
+  const gone = await store.insertContribution({ subjectKey: "pursuit:a", about: ["pursuit:a", "pursuit:b"], content: "retire me", why: "w", source: "contribution", principalId: null, ts: new Date() });
+  await store.insertContribution({ subjectKey: "person:ann", content: "retire me too", why: "w", source: "contribution", principalId: null, ts: new Date() });
+  expect((await store.contributions("pursuit:b", 10)).length).toBe(1);
+  expect((await store.recentlyActive({ type: "pursuit", limit: 5 })).length).toBe(2);
+  await handle.db.update(handle.tables.subject).set({ profileDirty: false });
+
+  expect(await store.retire({ id: gone.id, actor: person, reason: "wrong" })).toBe(true);
+
+  expect(await store.contributions("pursuit:a", 10)).toEqual([]);
+  expect(await store.contributions("pursuit:b", 10)).toEqual([]);
+  expect(await store.recentlyActive({ type: "pursuit", limit: 5 })).toEqual([]);
+  expect((await store.contributions("person:ann", 10)).map((c) => c.content).sort()).toEqual(["keep me", "retire me too"]);
+  const md = await createProject(host, store).projectDossier("pursuit:a");
+  expect(md ?? "").not.toContain("retire me");
+  const body = (await createRecall(host, store).recall("pursuit:b", { name: "n", intro: "i" }))?.body ?? "";
+  expect(body).not.toContain("retire me");
+
+  const [row] = await handle.db.select().from(handle.tables.contribution).where(eq(handle.tables.contribution.id, gone.id));
+  expect(row?.retiredAt).toBeInstanceOf(Date);
+  expect(row?.retiredByKind).toBe("person");
+  expect(row?.retiredById).toBe("u1");
+  expect(row?.retiredReason).toBe("wrong");
+  expect(keep.id).not.toBe(gone.id);
+  // both subjects the note was about are dirty again
+  for (const k of ["pursuit:a", "pursuit:b"]) expect((await store.getSubject(k))?.profileDirty).toBe(true);
+  expect((await store.getSubject("person:ann"))?.profileDirty).toBe(false);
+});
+
+test("retire hides an observation from liveRowsAbout and evidence", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await store.getOrCreateSubject("group:home", "Home");
+  const a = await store.insertObservation({ ...retireObs("gone"), about: ["person:ann", "group:home"], naturalKey: "k1" });
+  await store.insertObservation(retireObs("stays"));
+  await handle.db.update(handle.tables.subject).set({ profileDirty: false });
+
+  expect(await store.retire({ id: a.id, actor: person, reason: "wrong" })).toBe(true);
+
+  expect((await store.evidence("person:ann", { fleetOnly: false, limit: 10 })).map((r) => r.value)).toEqual(["stays"]);
+  expect((await store.evidence("person:ann", { fleetOnly: true, limit: 10 })).map((r) => r.value)).toEqual(["stays"]);
+  expect((await store.liveRowsAbout(["person:ann"], { topic: null, limit: 10 })).matched).toBe(1);
+  expect((await store.liveRowsAbout(["group:home"], { topic: null, limit: 10 })).matched).toBe(0);
+  const [row] = await handle.db.select().from(handle.tables.observation).where(eq(handle.tables.observation.id, a.id));
+  expect(row?.retiredAt).toBeInstanceOf(Date);
+  expect(row?.retiredById).toBe("u1");
+  for (const k of ["person:ann", "group:home"]) expect((await store.getSubject(k))?.profileDirty).toBe(true);
+});
+
+test("retire returns false for an unknown or already-retired id", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const c = await store.insertContribution({ subjectKey: "person:ann", content: "x", why: "w", source: "contribution", principalId: null, ts: new Date() });
+  expect(await store.retire({ id: "nope", actor: person, reason: "r" })).toBe(false);
+  expect(await store.retire({ id: c.id, actor: person, reason: "first" })).toBe(true);
+  await handle.db.update(handle.tables.subject).set({ profileDirty: false });
+  expect(await store.retire({ id: c.id, actor: { kind: "agent", id: "a2" }, reason: "second" })).toBe(false);
+  const [row] = await handle.db.select().from(handle.tables.contribution).where(eq(handle.tables.contribution.id, c.id));
+  expect(row?.retiredReason).toBe("first");
+  expect((await store.getSubject("person:ann"))?.profileDirty).toBe(false);
+});
+
+test("reapSuperseded does not delete retired rows", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const o = await store.insertObservation(retireObs("old"));
+  const newer = await store.insertObservation(retireObs("new"));
+  const long = new Date("2020-01-01T00:00:00Z");
+  // superseded long ago AND retired: retirement protects it
+  await store.supersede(o.id, newer.id, long);
+  await handle.db.update(handle.tables.observation).set({ retiredAt: long }).where(eq(handle.tables.observation.id, o.id));
+  expect(await store.reapSuperseded(new Date())).toBe(0);
+  expect((await handle.db.select().from(handle.tables.observation).where(eq(handle.tables.observation.id, o.id))).length).toBe(1);
+});
+
+test("retiring an observation releases its natural key, so a re-observation is a new live row", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const a = await store.insertObservation({ ...retireObs("v1"), naturalKey: "nk" });
+  expect(await store.retire({ id: a.id, actor: person, reason: "wrong" })).toBe(true);
+  const b = await store.insertObservation({ ...retireObs("v2"), naturalKey: "nk" });
+  expect(b.id).not.toBe(a.id);
+  expect((await store.evidence("person:ann", { fleetOnly: false, limit: 10 })).map((r) => [r.id, r.value])).toEqual([[b.id, "v2"]]);
+  const [old] = await handle.db.select().from(handle.tables.observation).where(eq(handle.tables.observation.id, a.id));
+  expect(old?.retiredAt).toBeInstanceOf(Date);
+});
+
+const note = (about: string[], content: string, ts = new Date(), actor?: { kind: "person" | "agent"; id: string; label?: string }) =>
+  store.insertContribution({ subjectKey: about[0]!, about, content, why: "w", source: "contribution", principalId: null, ts, actorKind: actor?.kind, actorId: actor?.id, actorLabel: actor?.label });
+
+test("listContributions returns a note about two listed subjects once", async () => {
+  await note(["pursuit:a", "pursuit:b"], "both", new Date(2026, 0, 2), { kind: "person", id: "u1", label: "Una" });
+  await note(["pursuit:a"], "only a", new Date(2026, 0, 3));
+  await note(["pursuit:c"], "unrelated", new Date(2026, 0, 4));
+  const rows = await store.listContributions({ about: ["pursuit:a", "pursuit:b"] });
+  expect(rows.map((r) => r.content)).toEqual(["only a", "both"]);
+  expect(rows[1]!.about).toEqual(["pursuit:a", "pursuit:b"]);
+  expect(rows[1]!.actor).toEqual({ kind: "person", id: "u1", label: "Una" });
+  expect(rows[0]!.actor).toBeNull();
+  expect(rows[0]!.why).toBe("w");
+  expect((await store.listContributions({ about: ["pursuit:a", "pursuit:b"], limit: 1 })).length).toBe(1);
+});
+
+test("listContributions excludes retired notes", async () => {
+  const keep = await note(["pursuit:a"], "keep");
+  const gone = await note(["pursuit:a"], "gone");
+  await store.retire({ id: gone.id, actor: person, reason: "wrong" });
+  const rows = await store.listContributions({ about: ["pursuit:a"] });
+  expect(rows.map((r) => r.id)).toEqual([keep.id]);
+});
+
+test("re-observing a natural key: an actor replaces the actor, no actor keeps it", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  const at = (actor?: { kind: string; id: string; label?: string }) =>
+    store.insertObservation({ ...retireObs("v"), naturalKey: "nk-actor", actorKind: actor?.kind ?? null, actorId: actor?.id ?? null, actorLabel: actor?.label ?? null });
+  const read = async () => (await handle.db.select().from(handle.tables.observation))
+    .map((r) => [r.actorKind, r.actorId, r.actorLabel]);
+  const a = await at({ kind: "person", id: "A", label: "Ann B" });
+  expect(await read()).toEqual([["person", "A", "Ann B"]]);
+  expect((await at()).id).toBe(a.id);
+  expect(await read()).toEqual([["person", "A", "Ann B"]]);
+  expect((await at({ kind: "agent", id: "B" })).id).toBe(a.id);
+  expect(await read()).toEqual([["agent", "B", null]]);
+});
+
+test("listContributions breaks a ts tie by id DESC and clamps limit to 1..500", async () => {
+  const ts = new Date(2026, 0, 5);
+  const ids = ["c-b", "c-c", "c-a"];
+  for (const id of ids) await handle.db.insert(handle.tables.contribution).values({ id, authorAgent: "a", subjectKey: "pursuit:t", about: ["pursuit:t"], content: id, why: "", ts });
+  expect((await store.listContributions({ about: ["pursuit:t"] })).map((r) => r.id)).toEqual(["c-c", "c-b", "c-a"]);
+  expect((await store.listContributions({ about: ["pursuit:t"], limit: 0 })).length).toBe(1);
+  expect((await store.listContributions({ about: ["pursuit:t"], limit: -5 })).length).toBe(1);
+  await handle.db.insert(handle.tables.contribution).values(Array.from({ length: 510 }, (_, i) => ({ authorAgent: "a", subjectKey: "pursuit:t", about: ["pursuit:t"], content: `n${i}`, why: "", ts })));
+  expect((await store.listContributions({ about: ["pursuit:t"], limit: 10_000 })).length).toBe(500);
+});

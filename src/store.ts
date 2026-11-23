@@ -1,14 +1,19 @@
-import { and, arrayOverlaps, asc, desc, eq, inArray, isNull, lt, max, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, asc, desc, eq, inArray, isNull, lt, max, ne, or, sql, type Column, type SQL } from "drizzle-orm";
 
 import { ATTENTION, KNOWN_SUBJECTS_CAP, SUPERSEDED_RETENTION_DAYS } from "./constants";
 import type { Handle } from "./db";
 import type { MemoryHost } from "./host";
+import { assertActor, type Actor } from "./extract";
 import { assertDeclaredKey } from "./registry";
 import type { Tables } from "./schema";
 
 export interface SubjectRow {
   id: string; key: string; label: string; attention: string; members: string[];
   profileDirty: boolean; dirtyGen: number; profilePath: string | null; profileSynthAt: Date | null;
+}
+
+export interface ContributionRow {
+  id: string; about: string[]; content: string; why: string; actor: Actor | null; ts: Date;
 }
 
 export interface LiveRow {
@@ -21,6 +26,7 @@ export interface ObservationData {
   subjectKey: string; about: string[]; predicate: string; value: string; valueNum: number | null; unit: string | null;
   ts: Date; source: string; sourceGrade: string; naturalKey: string | null; provenancePath: string | null;
   visibility: string; kind: string; topics: string[];
+  actorKind?: string | null; actorId?: string | null; actorLabel?: string | null;
 }
 
 // See docs/DESIGN.md §8. Scopes AGENTS, not humans:
@@ -36,6 +42,24 @@ export function visibilityCondition(tables: Tables, readerAgent: string): SQL {
 export function fleetOnlyCondition(tables: Tables): SQL {
   return eq(tables.observation.visibility, "fleet");
 }
+
+/** The one private-subject rule, shared by every read that can carry a row
+ *  across subjects (evidence, contributions, listContributions). A row is
+ *  dropped when its `about` names a subject of a private type that is not in
+ *  `allowed` (the subject being read, plus any `privateScope` the caller
+ *  holds). SQL, so it applies before any LIMIT. No private types = undefined,
+ *  so the query is exactly what it was before. */
+export function privateSubjectCondition(about: Column, privateTypes: readonly string[] | undefined, allowed: readonly string[]): SQL | undefined {
+  if (!privateTypes || privateTypes.length === 0) return undefined;
+  const arr = (xs: readonly string[]) => sql`ARRAY[${sql.join(xs.map((x) => sql`${x}`), sql`, `)}]::text[]`;
+  const notAllowed = allowed.length === 0 ? sql`` : sql` AND a <> ALL(${arr(allowed)})`;
+  return sql`NOT EXISTS (SELECT 1 FROM unnest(${about}) AS a WHERE split_part(a, ':', 1) = ANY(${arr(privateTypes)})${notAllowed})`;
+}
+
+/** Private-subject options on a read. `excludePrivateTypes` turns the rule on
+ *  (callers pass `host.privateSubjectTypes`); `privateScope` lists the private
+ *  subjects this reader may see besides the subject itself. */
+export interface PrivateReadOpts { excludePrivateTypes?: readonly string[]; privateScope?: readonly string[] }
 
 export function createStore(handle: Handle, host: MemoryHost) {
   const { db, tables } = handle;
@@ -80,9 +104,9 @@ export function createStore(handle: Handle, host: MemoryHost) {
       FROM ${subject} s
       JOIN LATERAL (
         SELECT max(t.at) AS last_at FROM (
-          SELECT o."ts" AS at FROM ${observation} o WHERE o."supersededById" IS NULL AND o."about" @> ARRAY[s."key"]
+          SELECT o."ts" AS at FROM ${observation} o WHERE o."supersededById" IS NULL AND o."retiredAt" IS NULL AND o."about" @> ARRAY[s."key"]
           UNION ALL
-          SELECT c."ts" AS at FROM ${contribution} c WHERE c."subjectKey" = s."key"
+          SELECT c."ts" AS at FROM ${contribution} c WHERE c."retiredAt" IS NULL AND c."about" @> ARRAY[s."key"]
         ) t
       ) e ON true
       WHERE s."key" LIKE ${opts.type + ":%"} AND e.last_at IS NOT NULL
@@ -119,11 +143,11 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return { profileDirty: true, dirtyGen: sql`${subject.dirtyGen} + 1` };
   }
 
-  async function markDirty(keys: string[]): Promise<void> {
+  async function markDirty(keys: string[], conn: Pick<typeof db, "update"> = db): Promise<void> {
     if (keys.length === 0) return;
-    await db.update(subject).set(dirty()).where(inArray(subject.key, keys));
+    await conn.update(subject).set(dirty()).where(inArray(subject.key, keys));
     // A member's write dirties every composite that lists it.
-    await db.update(subject).set(dirty()).where(arrayOverlaps(subject.members, keys));
+    await conn.update(subject).set(dirty()).where(arrayOverlaps(subject.members, keys));
   }
 
   /** Every subject a consolidation pass should look at: dirty, and not
@@ -178,6 +202,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
     const where = and(
       arrayOverlaps(observation.about, keys),
       isNull(observation.supersededById),
+      isNull(observation.retiredAt),
       visibilityCondition(tables, host.agentId),
       ...(opts.topic === null ? [] : [arrayOverlaps(observation.topics, [opts.topic])]),
     );
@@ -188,10 +213,11 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return { rows, matched };
   }
 
-  async function evidence(key: string, opts: { fleetOnly: boolean; limit: number }): Promise<LiveRow[]> {
+  async function evidence(key: string, opts: { fleetOnly: boolean; limit: number } & PrivateReadOpts): Promise<LiveRow[]> {
     return db.select(liveCols).from(observation)
-      .where(and(arrayOverlaps(observation.about, [key]), isNull(observation.supersededById),
-        opts.fleetOnly ? fleetOnlyCondition(tables) : visibilityCondition(tables, host.agentId)))
+      .where(and(arrayOverlaps(observation.about, [key]), isNull(observation.supersededById), isNull(observation.retiredAt),
+        opts.fleetOnly ? fleetOnlyCondition(tables) : visibilityCondition(tables, host.agentId),
+        privateSubjectCondition(observation.about, opts.excludePrivateTypes, [key, ...(opts.privateScope ?? [])])))
       .orderBy(desc(observation.ts), desc(observation.id)).limit(opts.limit);
   }
 
@@ -204,9 +230,34 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return row ?? null;
   }
 
-  async function contributions(key: string, limit: number) {
+  /** `excludePrivateTypes`: drop a note that is also about a subject of one of these
+   *  types (other than `key` itself and `privateScope`), so a private note stays
+   *  out of a shared dossier. */
+  async function contributions(key: string, limit: number, opts: PrivateReadOpts = {}) {
+    const notPrivate = privateSubjectCondition(contribution.about, opts.excludePrivateTypes, [key, ...(opts.privateScope ?? [])]);
     return db.select({ authorAgent: contribution.authorAgent, content: contribution.content, why: contribution.why, ts: contribution.ts })
-      .from(contribution).where(eq(contribution.subjectKey, key)).orderBy(desc(contribution.ts)).limit(limit);
+      .from(contribution).where(and(arrayOverlaps(contribution.about, [key]), isNull(contribution.retiredAt), notPrivate)).orderBy(desc(contribution.ts)).limit(limit);
+  }
+
+  /** Default 200, clamped to 1..500 (a non-number reads as the default). */
+  function clampListLimit(limit: number | undefined): number {
+    if (limit === undefined || !Number.isFinite(limit)) return 200;
+    return Math.min(500, Math.max(1, Math.floor(limit)));
+  }
+
+  /** Live notes whose `about` overlaps `about`, newest first (ties by id), each once.
+   *  With `host.privateSubjectTypes`, a note about a private subject is left out
+   *  unless that subject is one of `about` or `privateScope`. */
+  async function listContributions(opts: { about: string[]; limit?: number; privateScope?: string[] }): Promise<ContributionRow[]> {
+    if (opts.about.length === 0) return [];
+    const rows = await db.select().from(contribution)
+      .where(and(arrayOverlaps(contribution.about, opts.about), isNull(contribution.retiredAt),
+        privateSubjectCondition(contribution.about, host.privateSubjectTypes, [...opts.about, ...(opts.privateScope ?? [])])))
+      .orderBy(desc(contribution.ts), desc(contribution.id)).limit(clampListLimit(opts.limit));
+    return rows.map((r) => ({
+      id: r.id, about: r.about, content: r.content, why: r.why, ts: r.ts,
+      actor: r.actorKind ? { kind: r.actorKind as Actor["kind"], id: r.actorId ?? "", ...(r.actorLabel ? { label: r.actorLabel } : {}) } : null,
+    }));
   }
 
   /** Writes one observation, upserting when the caller supplied a natural key.
@@ -242,6 +293,8 @@ export function createStore(handle: Handle, host: MemoryHost) {
             predicate: data.predicate, value: data.value, valueNum: data.valueNum, unit: data.unit,
             kind: data.kind, topics: data.topics, ts: data.ts, source: data.source, sourceGrade: data.sourceGrade,
             provenancePath: data.provenancePath,
+            // a re-observation by a known actor takes the actor; one without never erases it
+            ...(data.actorKind ? { actorKind: data.actorKind, actorId: data.actorId, actorLabel: data.actorLabel } : {}),
             // escalate-only: an author row never becomes fleet by upsert; a fleet row does become author
             ...(data.visibility === "author" ? { visibility: "author" } : {}),
           },
@@ -261,8 +314,32 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return r.length > 0;
   }
 
-  async function insertContribution(data: { subjectKey: string; content: string; why: string; source: string; principalId: string | null; ts: Date }): Promise<void> {
-    await db.insert(contribution).values({ ...data, authorAgent: host.agentId });
+  async function insertContribution(data: { subjectKey: string; about?: string[]; content: string; why: string; source: string; principalId: string | null; ts: Date; actorKind?: string | null; actorId?: string | null; actorLabel?: string | null }): Promise<{ id: string }> {
+    const [row] = await db.insert(contribution).values({ ...data, about: data.about ?? [data.subjectKey], authorAgent: host.agentId }).returning({ id: contribution.id });
+    return row!;
+  }
+
+  /** Retires a Contribution or an Observation by id: the row is kept, marked,
+   *  and every live read skips it. Dirties every subject the row was about.
+   *  False, writing nothing, for an unknown or already-retired id.
+   *
+   *  A retired observation also releases its natural key (as a supersede
+   *  tombstone does), so a later re-observation inserts a fresh live row
+   *  instead of upserting into the retired one and vanishing. */
+  async function retire(opts: { id: string; actor: Actor; reason: string }): Promise<boolean> {
+    assertActor(opts.actor, "retire");
+    const mark = { retiredAt: new Date(), retiredByKind: opts.actor.kind, retiredById: opts.actor.id, retiredReason: opts.reason };
+    // One transaction: a failed markDirty must not leave a row retired
+    // while its subjects' dossiers still read as current.
+    return db.transaction(async (tx) => {
+      const [c] = await tx.update(contribution).set(mark)
+        .where(and(eq(contribution.id, opts.id), isNull(contribution.retiredAt))).returning({ about: contribution.about });
+      if (c) { await markDirty(c.about, tx); return true; }
+      const [o] = await tx.update(observation).set({ ...mark, naturalKey: null })
+        .where(and(eq(observation.id, opts.id), isNull(observation.retiredAt))).returning({ about: observation.about });
+      if (o) { await markDirty(o.about, tx); return true; }
+      return false;
+    });
   }
 
   /** The two reads health() is built on.
@@ -330,7 +407,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
     if (days === null) return 0;
     const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     const r = await db.delete(observation)
-      .where(and(sql`${observation.supersededById} IS NOT NULL`, lt(observation.supersededAt, cutoff)))
+      .where(and(sql`${observation.supersededById} IS NOT NULL`, isNull(observation.retiredAt), lt(observation.supersededAt, cutoff)))
       .returning({ id: observation.id });
     return r.length;
   }
@@ -338,8 +415,8 @@ export function createStore(handle: Handle, host: MemoryHost) {
   return {
     getSubject, getOrCreateSubject, knownSubjects, recentlyActive, findSubjectByLabel, setMembers, markDirty,
     dirtySubjects, setProfile, subjectByProfilePath,
-    resolveLocalKey, putAlias, liveRowsAbout, evidence, contributions, insertObservation, supersede,
-    insertContribution, reapSuperseded, lastWriteByAuthor, lastConsolidateAt,
+    resolveLocalKey, putAlias, liveRowsAbout, evidence, contributions, listContributions, insertObservation, supersede,
+    insertContribution, retire, reapSuperseded, lastWriteByAuthor, lastConsolidateAt,
   };
 }
 

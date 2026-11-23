@@ -63,6 +63,17 @@ export function buildTables(schemaName: string) {
       supersededById: text("supersededById"),
       kind: text("kind").notNull().default("general"),
       topics: text("topics").array().notNull().default(sql`ARRAY['general'::text]`),
+      // Who a write is on behalf of (a person or an agent), when the host says.
+      // Nullable: a write with no actor is exactly what it was before.
+      actorKind: text("actorKind"),
+      actorId: text("actorId"),
+      actorLabel: text("actorLabel"),
+      // Retired = taken out by a person or agent on purpose. The row is kept,
+      // never deleted, and every live read skips it. Nullable: live is NULL.
+      retiredAt: ts3("retiredAt"),
+      retiredByKind: text("retiredByKind"),
+      retiredById: text("retiredById"),
+      retiredReason: text("retiredReason"),
     },
     (t) => [
       uniqueIndex("Observation_authorAgent_subjectKey_naturalKey_key").on(t.authorAgent, t.subjectKey, t.naturalKey),
@@ -83,14 +94,30 @@ export function buildTables(schemaName: string) {
       id: cuid(),
       authorAgent: text("authorAgent").notNull(),
       subjectKey: text("subjectKey").notNull(),
+      // Every subject this note is about; the first is the filed subjectKey.
+      // Never empty: the 0003 migration backfilled older rows, and the 0005
+      // trigger sets an empty insert to [subjectKey].
+      about: text("about").array().notNull().default(sql`'{}'::text[]`),
       principalId: text("principalId"),
       content: text("content").notNull(),
       why: text("why").notNull(),
       source: text("source").notNull().default("contribution"),
+      actorKind: text("actorKind"),
+      actorId: text("actorId"),
+      actorLabel: text("actorLabel"),
       ts: ts3("ts").notNull().default(sql`CURRENT_TIMESTAMP`),
+      // Retired = taken out by a person or agent on purpose. The row is kept,
+      // never deleted, and every live read skips it. Nullable: live is NULL.
+      retiredAt: ts3("retiredAt"),
+      retiredByKind: text("retiredByKind"),
+      retiredById: text("retiredById"),
+      retiredReason: text("retiredReason"),
       createdAt: ts3("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
     },
-    (t) => [index("Contribution_subjectKey_ts_idx").on(t.subjectKey, t.ts)],
+    (t) => [
+      index("Contribution_subjectKey_ts_idx").on(t.subjectKey, t.ts),
+      index("Contribution_about_idx").using("gin", t.about),
+    ],
   );
 
   const alias = s.table(

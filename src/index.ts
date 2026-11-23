@@ -18,6 +18,7 @@ import type { MemoryHost } from "./host";
 import { createProject } from "./project";
 import { createRecall } from "./recall";
 import { createRecord } from "./record";
+import { RegistryError } from "./registry";
 import { createStore, type Store } from "./store";
 
 /**
@@ -37,12 +38,21 @@ export interface Memory {
   recall: ReturnType<typeof createRecall>["recall"];
   project: ReturnType<typeof createProject>["projectDossier"];
   subjects: Pick<Store, "getOrCreateSubject" | "getSubject" | "setMembers" | "putAlias" | "resolveLocalKey" | "knownSubjects" | "recentlyActive">;
+  retire: Store["retire"];
+  listContributions: Store["listContributions"];
   health(opts: { writeCadenceDays: number; consolidateCadenceDays: number; now?: Date }): Promise<HealthReport>;
   calibrate: ReturnType<typeof createCalibration>["recordPredictionOutcome"];
   close(): Promise<void>;
 }
 
 export function createMemory(host: MemoryHost): Memory {
+  // Before the pool opens, so a refused host leaks no connections. A misspelt
+  // private type would otherwise exclude nothing, silently: fail closed.
+  for (const t of host.privateSubjectTypes ?? []) {
+    if (!host.registry.subjectTypes.some((st) => st.name === t)) {
+      throw new RegistryError(`privateSubjectTypes: "${t}" is not a subject type in the host's registry`);
+    }
+  }
   const handle = openDb(host.db.url, host.db.schema);
   const store = createStore(handle, host);
   const record = createRecord(host, store);
@@ -62,6 +72,8 @@ export function createMemory(host: MemoryHost): Memory {
       knownSubjects: store.knownSubjects,
       recentlyActive: store.recentlyActive,
     },
+    retire: store.retire,
+    listContributions: store.listContributions,
     /** Both cadences come from the host. There is no default: a library that
      *  guesses how often its host writes reports a false alarm or, worse, a
      *  false all-clear. */
@@ -77,5 +89,6 @@ export { DEFAULT_REGISTRY, withTypes, RegistryError } from "./registry";
 export { computeHealth } from "./health";
 export type { MemoryHost, CompleteFn, LogEvent, Lens } from "./host";
 export type { Registry, SubjectType, Topic } from "./registry";
-export type { ObservationInput, AboutEntry } from "./extract";
+export type { ContributionRow } from "./store";
+export type { ObservationInput, AboutEntry, Actor } from "./extract";
 export type { HealthReport, HealthFlag } from "./health";

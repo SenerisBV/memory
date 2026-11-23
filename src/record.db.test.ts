@@ -2,6 +2,7 @@ import { beforeEach, expect, test } from "bun:test";
 
 import { handle, resetDb } from "../tests/setup";
 import { fakeHost } from "../tests/fakes";
+import { createProject } from "./project";
 import { createRecord } from "./record";
 import { createStore } from "./store";
 
@@ -231,4 +232,101 @@ test("a verdict against a row this candidate is not about is downgraded to recor
   const audit = host.events.slice(before).find((e) => e.source === "memory-reconcile" && e.payload?.verdicts);
   const notes = (audit!.payload!.verdicts as { why: string }[]).map((v) => v.why).join(" | ");
   expect(notes).toContain("DOWNGRADED");
+});
+
+test("contribute stores the actor and returns the new id", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  const res = await record.recordContribution({
+    about: "person:pat", content: "Bill the lab fee separately",
+    actor: { kind: "person", id: "42", label: "Pat Biller" },
+  });
+  const rows = await handle.db.select().from(handle.tables.contribution);
+  expect(rows.length).toBe(1);
+  expect(res.id).toBe(rows[0]!.id);
+  expect(rows[0]).toMatchObject({ actorKind: "person", actorId: "42", actorLabel: "Pat Biller", principalId: "42", why: "" });
+});
+
+test("an explicit principalId wins over the person actor's id", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  await record.recordContribution({ about: "person:pat", content: "x", principalId: "p-9", actor: { kind: "person", id: "42" } });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(row).toMatchObject({ principalId: "p-9", actorId: "42", actorLabel: null });
+});
+
+test("an agent actor does not set principalId", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  await record.recordContribution({ about: "person:pat", content: "x", why: "because", actor: { kind: "agent", id: "helper" } });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(row).toMatchObject({ actorKind: "agent", actorId: "helper", principalId: null, why: "because" });
+});
+
+test("contribute without an actor behaves as before", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  const res = await record.recordContribution({ about: "person:pat", content: "x", why: "y" });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(res.id).toBe(row!.id);
+  expect(row).toMatchObject({ actorKind: null, actorId: null, actorLabel: null, principalId: null, authorAgent: host.agentId, why: "y" });
+});
+
+test("record stores the actor on observations", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  await record.recordObservations({
+    source: "office-visit", classify, reconcile: recordAll,
+    observations: [
+      { about: ["person:pat"], predicate: "has-class", value: "art", actor: { kind: "person", id: "42", label: "Pat Biller" } },
+      { about: ["person:pat"], predicate: "has-pet", value: "a cat" },
+    ],
+  });
+  const rows = await handle.db.select().from(handle.tables.observation);
+  const withActor = rows.find((r) => r.predicate === "has-class")!;
+  const without = rows.find((r) => r.predicate === "has-pet")!;
+  expect(withActor).toMatchObject({ actorKind: "person", actorId: "42", actorLabel: "Pat Biller" });
+  expect(without).toMatchObject({ actorKind: null, actorId: null, actorLabel: null });
+});
+
+test("a contribution about two subjects is found under either", async () => {
+  await store.getOrCreateSubject("person:noor", "Noor");
+  await store.getOrCreateSubject("group:home", "Home");
+  await record.recordContribution({ about: ["person:noor", "group:home"], content: "bill modifier 25 for this pair" });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(row!.subjectKey).toBe("person:noor");
+  expect(row!.about).toEqual(["person:noor", "group:home"]);
+  for (const key of ["group:home", "person:noor"]) {
+    expect((await store.contributions(key, 10)).length).toBe(1);
+    expect(await createProject(host, store).projectDossier(key)).toContain("bill modifier 25 for this pair");
+  }
+  expect((await store.getSubject("person:noor"))?.profileDirty).toBe(true);
+  expect((await store.getSubject("group:home"))?.profileDirty).toBe(true);
+});
+
+test("a string about still files and stores about = [key]", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await record.recordContribution({ about: "person:ann", content: "x" });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(row!.about).toEqual(["person:ann"]);
+});
+
+test("an unknown subject among several throws and writes nothing", async () => {
+  await store.getOrCreateSubject("person:ann", "Ann");
+  await expect(record.recordContribution({ about: ["person:ann", "person:nobody"], content: "x" })).rejects.toThrow();
+  expect((await handle.db.select().from(handle.tables.contribution)).length).toBe(0);
+});
+
+test("contribute, record and retire refuse an actor with an empty id or an unknown kind", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  const bad = [{ kind: "person", id: "" }, { kind: "person", id: "  " }, { kind: "robot", id: "r1" }] as never[];
+  for (const actor of bad) {
+    await expect(record.recordContribution({ about: "person:pat", content: "x", actor })).rejects.toThrow(/actor/);
+    await expect(record.recordObservations({
+      source: "office-visit", classify, reconcile: recordAll,
+      observations: [
+        { about: ["person:pat"], predicate: "fine", value: "first", actor: { kind: "agent", id: "a1" } },
+        { about: ["person:pat"], predicate: "bad", value: "second", actor },
+      ],
+    })).rejects.toThrow(/actor/);
+    await expect(store.retire({ id: "any", actor, reason: "r" })).rejects.toThrow(/actor/);
+  }
+  // nothing was written, not even the batch's valid first observation
+  expect(await handle.db.select().from(handle.tables.contribution)).toEqual([]);
+  expect(await handle.db.select().from(handle.tables.observation)).toEqual([]);
 });
