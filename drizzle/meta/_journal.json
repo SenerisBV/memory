@@ -29,6 +29,13 @@
       "when": 1795457785871,
       "tag": "0003_thin_matthew_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795457936472,
+      "tag": "0004_freezing_kingpin",
+      "breakpoints": true
     }
   ]
 }

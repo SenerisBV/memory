@@ -68,6 +68,12 @@ export function buildTables(schemaName: string) {
       actorKind: text("actorKind"),
       actorId: text("actorId"),
       actorLabel: text("actorLabel"),
+      // Retired = taken out by a person or agent on purpose. The row is kept,
+      // never deleted, and every live read skips it. Nullable: live is NULL.
+      retiredAt: ts3("retiredAt"),
+      retiredByKind: text("retiredByKind"),
+      retiredById: text("retiredById"),
+      retiredReason: text("retiredReason"),
     },
     (t) => [
       uniqueIndex("Observation_authorAgent_subjectKey_naturalKey_key").on(t.authorAgent, t.subjectKey, t.naturalKey),
@@ -99,6 +105,12 @@ export function buildTables(schemaName: string) {
       actorId: text("actorId"),
       actorLabel: text("actorLabel"),
       ts: ts3("ts").notNull().default(sql`CURRENT_TIMESTAMP`),
+      // Retired = taken out by a person or agent on purpose. The row is kept,
+      // never deleted, and every live read skips it. Nullable: live is NULL.
+      retiredAt: ts3("retiredAt"),
+      retiredByKind: text("retiredByKind"),
+      retiredById: text("retiredById"),
+      retiredReason: text("retiredReason"),
       createdAt: ts3("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
     },
     (t) => [

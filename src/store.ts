@@ -81,9 +81,9 @@ export function createStore(handle: Handle, host: MemoryHost) {
       FROM ${subject} s
       JOIN LATERAL (
         SELECT max(t.at) AS last_at FROM (
-          SELECT o."ts" AS at FROM ${observation} o WHERE o."supersededById" IS NULL AND o."about" @> ARRAY[s."key"]
+          SELECT o."ts" AS at FROM ${observation} o WHERE o."supersededById" IS NULL AND o."retiredAt" IS NULL AND o."about" @> ARRAY[s."key"]
           UNION ALL
-          SELECT c."ts" AS at FROM ${contribution} c WHERE c."about" @> ARRAY[s."key"]
+          SELECT c."ts" AS at FROM ${contribution} c WHERE c."retiredAt" IS NULL AND c."about" @> ARRAY[s."key"]
         ) t
       ) e ON true
       WHERE s."key" LIKE ${opts.type + ":%"} AND e.last_at IS NOT NULL
@@ -179,6 +179,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
     const where = and(
       arrayOverlaps(observation.about, keys),
       isNull(observation.supersededById),
+      isNull(observation.retiredAt),
       visibilityCondition(tables, host.agentId),
       ...(opts.topic === null ? [] : [arrayOverlaps(observation.topics, [opts.topic])]),
     );
@@ -191,7 +192,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
 
   async function evidence(key: string, opts: { fleetOnly: boolean; limit: number }): Promise<LiveRow[]> {
     return db.select(liveCols).from(observation)
-      .where(and(arrayOverlaps(observation.about, [key]), isNull(observation.supersededById),
+      .where(and(arrayOverlaps(observation.about, [key]), isNull(observation.supersededById), isNull(observation.retiredAt),
         opts.fleetOnly ? fleetOnlyCondition(tables) : visibilityCondition(tables, host.agentId)))
       .orderBy(desc(observation.ts), desc(observation.id)).limit(opts.limit);
   }
@@ -207,7 +208,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
 
   async function contributions(key: string, limit: number) {
     return db.select({ authorAgent: contribution.authorAgent, content: contribution.content, why: contribution.why, ts: contribution.ts })
-      .from(contribution).where(arrayOverlaps(contribution.about, [key])).orderBy(desc(contribution.ts)).limit(limit);
+      .from(contribution).where(and(arrayOverlaps(contribution.about, [key]), isNull(contribution.retiredAt))).orderBy(desc(contribution.ts)).limit(limit);
   }
 
   /** Writes one observation, upserting when the caller supplied a natural key.
@@ -267,6 +268,24 @@ export function createStore(handle: Handle, host: MemoryHost) {
   async function insertContribution(data: { subjectKey: string; about?: string[]; content: string; why: string; source: string; principalId: string | null; ts: Date; actorKind?: string | null; actorId?: string | null; actorLabel?: string | null }): Promise<{ id: string }> {
     const [row] = await db.insert(contribution).values({ ...data, about: data.about ?? [data.subjectKey], authorAgent: host.agentId }).returning({ id: contribution.id });
     return row!;
+  }
+
+  /** Retires a Contribution or an Observation by id: the row is kept, marked,
+   *  and every live read skips it. Dirties every subject the row was about.
+   *  False, writing nothing, for an unknown or already-retired id.
+   *
+   *  A retired observation also releases its natural key (as a supersede
+   *  tombstone does), so a later re-observation inserts a fresh live row
+   *  instead of upserting into the retired one and vanishing. */
+  async function retire(opts: { id: string; actor: { kind: string; id: string }; reason: string }): Promise<boolean> {
+    const mark = { retiredAt: new Date(), retiredByKind: opts.actor.kind, retiredById: opts.actor.id, retiredReason: opts.reason };
+    const [c] = await db.update(contribution).set(mark)
+      .where(and(eq(contribution.id, opts.id), isNull(contribution.retiredAt))).returning({ about: contribution.about });
+    if (c) { await markDirty(c.about); return true; }
+    const [o] = await db.update(observation).set({ ...mark, naturalKey: null })
+      .where(and(eq(observation.id, opts.id), isNull(observation.retiredAt))).returning({ about: observation.about });
+    if (o) { await markDirty(o.about); return true; }
+    return false;
   }
 
   /** The two reads health() is built on.
@@ -334,7 +353,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
     if (days === null) return 0;
     const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     const r = await db.delete(observation)
-      .where(and(sql`${observation.supersededById} IS NOT NULL`, lt(observation.supersededAt, cutoff)))
+      .where(and(sql`${observation.supersededById} IS NOT NULL`, isNull(observation.retiredAt), lt(observation.supersededAt, cutoff)))
       .returning({ id: observation.id });
     return r.length;
   }
@@ -343,7 +362,7 @@ export function createStore(handle: Handle, host: MemoryHost) {
     getSubject, getOrCreateSubject, knownSubjects, recentlyActive, findSubjectByLabel, setMembers, markDirty,
     dirtySubjects, setProfile, subjectByProfilePath,
     resolveLocalKey, putAlias, liveRowsAbout, evidence, contributions, insertObservation, supersede,
-    insertContribution, reapSuperseded, lastWriteByAuthor, lastConsolidateAt,
+    insertContribution, retire, reapSuperseded, lastWriteByAuthor, lastConsolidateAt,
   };
 }
 
