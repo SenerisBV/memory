@@ -95,7 +95,8 @@ export function buildTables(schemaName: string) {
       authorAgent: text("authorAgent").notNull(),
       subjectKey: text("subjectKey").notNull(),
       // Every subject this note is about; the first is the filed subjectKey.
-      // Empty only transiently: the 0003 migration backfills older rows.
+      // Never empty: the 0003 migration backfilled older rows, and the 0005
+      // trigger sets an empty insert to [subjectKey].
       about: text("about").array().notNull().default(sql`'{}'::text[]`),
       principalId: text("principalId"),
       content: text("content").notNull(),

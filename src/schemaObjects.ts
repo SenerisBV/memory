@@ -1,7 +1,7 @@
 // Declare it or lose it. On 2026-05-07 a fleet migration dropped two HNSW
-// indexes and nothing noticed for three and a half months. Every index and
-// check constraint the library creates is listed here; the db test checks
-// both directions against the catalog.
+// indexes and nothing noticed for three and a half months. Every index,
+// check constraint and trigger the library creates is listed here; the db
+// test checks both directions against the catalog.
 import { sql } from "drizzle-orm";
 
 import type { Handle } from "./db";
@@ -16,10 +16,14 @@ const INDEXES = [
 
 const CHECKS = ["Subject_key_typed_check", "Observation_about_primary_check"] as const;
 
+/** 0005: an insert with an empty `about` gets `[subjectKey]`, so no note is invisible. */
+const TRIGGERS = ["Contribution_about_default"] as const;
+
 export function declaredObjects(schemaName: string): string[] {
   return [
     ...INDEXES.map((n) => `index:${schemaName}.${n}`),
     ...CHECKS.map((n) => `check:${schemaName}.${n}`),
+    ...TRIGGERS.map((n) => `trigger:${schemaName}.${n}`),
   ];
 }
 
@@ -29,6 +33,9 @@ export async function presentObjects(handle: Handle): Promise<string[]> {
     UNION ALL
     SELECT 'check:' || n.nspname || '.' || c.conname FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
       WHERE c.contype = 'c' AND n.nspname = ${handle.schemaName}
+    UNION ALL
+    SELECT 'trigger:' || n.nspname || '.' || t.tgname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE NOT t.tgisinternal AND n.nspname = ${handle.schemaName}
     ORDER BY 1`);
   return (r.rows as { obj: string }[]).map((x) => x.obj);
 }

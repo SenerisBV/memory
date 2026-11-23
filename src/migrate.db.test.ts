@@ -41,11 +41,32 @@ test("the Contribution.about backfill sets about = [subjectKey] for rows that pr
   expect(backfill).toBeDefined();
   await resetDb();
   await handle.db.insert(handle.tables.subject).values({ key: "person:old", label: "Old" });
-  // a pre-migration row: the new column's default leaves about empty
-  await handle.db.insert(handle.tables.contribution).values({ authorAgent: "a", subjectKey: "person:old", content: "c", why: "", about: [] });
+  // a pre-migration row: the new column's default leaves about empty. The 0005
+  // trigger would fill it on insert, so it is off for this one row.
+  await handle.db.execute(sql`ALTER TABLE "memory"."Contribution" DISABLE TRIGGER "Contribution_about_default"`);
+  try {
+    await handle.db.insert(handle.tables.contribution).values({ authorAgent: "a", subjectKey: "person:old", content: "c", why: "", about: [] });
+  } finally {
+    await handle.db.execute(sql`ALTER TABLE "memory"."Contribution" ENABLE TRIGGER "Contribution_about_default"`);
+  }
+  const before = await handle.db.execute(sql`SELECT "about" FROM "memory"."Contribution"`);
+  expect((before.rows[0] as { about: string[] }).about).toEqual([]);
   await handle.db.execute(sql.raw(backfill));
   const r = await handle.db.execute(sql`SELECT "about" FROM "memory"."Contribution"`);
   expect((r.rows[0] as { about: string[] }).about).toEqual(["person:old"]);
   const empty = await handle.db.execute(sql`SELECT count(*)::int AS n FROM "memory"."Contribution" WHERE cardinality("about") = 0`);
   expect((empty.rows[0] as { n: number }).n).toBe(0);
+});
+
+test("a Contribution inserted with an empty about gets about = [subjectKey] (0005 trigger)", async () => {
+  const { createStore } = await import("./store");
+  const { fakeHost } = await import("../tests/fakes");
+  await resetDb();
+  await handle.db.insert(handle.tables.subject).values({ key: "person:raw", label: "Raw" });
+  await handle.db.execute(sql`INSERT INTO "memory"."Contribution" ("id", "authorAgent", "subjectKey", "about", "content", "why")
+    VALUES ('raw-1', 'a', 'person:raw', '{}', 'written by raw SQL', '')`);
+  const r = await handle.db.execute(sql`SELECT "about" FROM "memory"."Contribution" WHERE "id" = 'raw-1'`);
+  expect((r.rows[0] as { about: string[] }).about).toEqual(["person:raw"]);
+  const rows = await createStore(handle, fakeHost()).contributions("person:raw", 10);
+  expect(rows.map((c) => c.content)).toEqual(["written by raw SQL"]);
 });
