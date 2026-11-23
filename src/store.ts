@@ -1,4 +1,4 @@
-import { and, arrayOverlaps, asc, desc, eq, inArray, isNull, lt, max, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, asc, desc, eq, inArray, isNull, lt, max, ne, or, sql, type Column, type SQL } from "drizzle-orm";
 
 import { ATTENTION, KNOWN_SUBJECTS_CAP, SUPERSEDED_RETENTION_DAYS } from "./constants";
 import type { Handle } from "./db";
@@ -42,6 +42,24 @@ export function visibilityCondition(tables: Tables, readerAgent: string): SQL {
 export function fleetOnlyCondition(tables: Tables): SQL {
   return eq(tables.observation.visibility, "fleet");
 }
+
+/** The one private-subject rule, shared by every read that can carry a row
+ *  across subjects (evidence, contributions, listContributions). A row is
+ *  dropped when its `about` names a subject of a private type that is not in
+ *  `allowed` (the subject being read, plus any `privateScope` the caller
+ *  holds). SQL, so it applies before any LIMIT. No private types = undefined,
+ *  so the query is exactly what it was before. */
+export function privateSubjectCondition(about: Column, privateTypes: readonly string[] | undefined, allowed: readonly string[]): SQL | undefined {
+  if (!privateTypes || privateTypes.length === 0) return undefined;
+  const arr = (xs: readonly string[]) => sql`ARRAY[${sql.join(xs.map((x) => sql`${x}`), sql`, `)}]::text[]`;
+  const notAllowed = allowed.length === 0 ? sql`` : sql` AND a <> ALL(${arr(allowed)})`;
+  return sql`NOT EXISTS (SELECT 1 FROM unnest(${about}) AS a WHERE split_part(a, ':', 1) = ANY(${arr(privateTypes)})${notAllowed})`;
+}
+
+/** Private-subject options on a read. `excludePrivateTypes` turns the rule on
+ *  (callers pass `host.privateSubjectTypes`); `privateScope` lists the private
+ *  subjects this reader may see besides the subject itself. */
+export interface PrivateReadOpts { excludePrivateTypes?: readonly string[]; privateScope?: readonly string[] }
 
 export function createStore(handle: Handle, host: MemoryHost) {
   const { db, tables } = handle;
@@ -195,10 +213,11 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return { rows, matched };
   }
 
-  async function evidence(key: string, opts: { fleetOnly: boolean; limit: number }): Promise<LiveRow[]> {
+  async function evidence(key: string, opts: { fleetOnly: boolean; limit: number } & PrivateReadOpts): Promise<LiveRow[]> {
     return db.select(liveCols).from(observation)
       .where(and(arrayOverlaps(observation.about, [key]), isNull(observation.supersededById), isNull(observation.retiredAt),
-        opts.fleetOnly ? fleetOnlyCondition(tables) : visibilityCondition(tables, host.agentId)))
+        opts.fleetOnly ? fleetOnlyCondition(tables) : visibilityCondition(tables, host.agentId),
+        privateSubjectCondition(observation.about, opts.excludePrivateTypes, [key, ...(opts.privateScope ?? [])])))
       .orderBy(desc(observation.ts), desc(observation.id)).limit(opts.limit);
   }
 
@@ -212,20 +231,22 @@ export function createStore(handle: Handle, host: MemoryHost) {
   }
 
   /** `excludePrivateTypes`: drop a note that is also about a subject of one of these
-   *  types (other than `key` itself), so a private note stays out of a shared dossier. */
-  async function contributions(key: string, limit: number, opts: { excludePrivateTypes?: string[] } = {}) {
-    const priv = opts.excludePrivateTypes ?? [];
-    const notPrivate = priv.length === 0 ? undefined
-      : sql`NOT EXISTS (SELECT 1 FROM unnest(${contribution.about}) AS a WHERE a <> ${key} AND split_part(a, ':', 1) = ANY(${sql`ARRAY[${sql.join(priv.map((t) => sql`${t}`), sql`, `)}]::text[]`}))`;
+   *  types (other than `key` itself and `privateScope`), so a private note stays
+   *  out of a shared dossier. */
+  async function contributions(key: string, limit: number, opts: PrivateReadOpts = {}) {
+    const notPrivate = privateSubjectCondition(contribution.about, opts.excludePrivateTypes, [key, ...(opts.privateScope ?? [])]);
     return db.select({ authorAgent: contribution.authorAgent, content: contribution.content, why: contribution.why, ts: contribution.ts })
       .from(contribution).where(and(arrayOverlaps(contribution.about, [key]), isNull(contribution.retiredAt), notPrivate)).orderBy(desc(contribution.ts)).limit(limit);
   }
 
-  /** Live notes whose `about` overlaps `about`, newest first, each once. */
-  async function listContributions(opts: { about: string[]; limit?: number }): Promise<ContributionRow[]> {
+  /** Live notes whose `about` overlaps `about`, newest first, each once.
+   *  With `host.privateSubjectTypes`, a note about a private subject is left out
+   *  unless that subject is one of `about` or `privateScope`. */
+  async function listContributions(opts: { about: string[]; limit?: number; privateScope?: string[] }): Promise<ContributionRow[]> {
     if (opts.about.length === 0) return [];
     const rows = await db.select().from(contribution)
-      .where(and(arrayOverlaps(contribution.about, opts.about), isNull(contribution.retiredAt)))
+      .where(and(arrayOverlaps(contribution.about, opts.about), isNull(contribution.retiredAt),
+        privateSubjectCondition(contribution.about, host.privateSubjectTypes, [...opts.about, ...(opts.privateScope ?? [])])))
       .orderBy(desc(contribution.ts), desc(contribution.createdAt)).limit(opts.limit ?? 200);
     return rows.map((r) => ({
       id: r.id, about: r.about, content: r.content, why: r.why, ts: r.ts,

@@ -105,11 +105,18 @@ export function createConsolidate(host: MemoryHost, store: Store) {
     const isComposite = !!type?.composite && s.members.length > 0;
     // fleetOnly: a dossier is read by every agent, so it may only be built
     // from rows every agent may read.
-    const rows = await store.evidence(s.key, { fleetOnly: true, limit: MAX_OBS_PER_SYNTH });
+    // excludePrivateTypes: an observation about a private subject other than
+    // this one stays out, as a note does (store.privateSubjectCondition).
+    const rows = await store.evidence(s.key, { fleetOnly: true, limit: MAX_OBS_PER_SYNTH, excludePrivateTypes: host.privateSubjectTypes });
     const contributions = await store.contributions(s.key, 50, { excludePrivateTypes: host.privateSubjectTypes });
     const memberDossiers: string[] = [];
     if (isComposite) {
+      // A shared composite does not roll up a private member's dossier.
+      const priv = host.privateSubjectTypes ?? [];
+      const typeOf = (k: string) => k.slice(0, k.indexOf(":"));
+      const skipPrivate = priv.length > 0 && !priv.includes(typeOf(s.key));
       for (const m of s.members) {
+        if (skipPrivate && priv.includes(typeOf(m))) continue;
         const ms = await store.getSubject(m);
         if (!ms || ms.attention === ATTENTION.IGNORE) continue;
         const body = await readDossier(ms);

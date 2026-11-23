@@ -18,6 +18,7 @@ import type { MemoryHost } from "./host";
 import { createProject } from "./project";
 import { createRecall } from "./recall";
 import { createRecord } from "./record";
+import { RegistryError } from "./registry";
 import { createStore, type Store } from "./store";
 
 /**
@@ -45,6 +46,13 @@ export interface Memory {
 }
 
 export function createMemory(host: MemoryHost): Memory {
+  // Before the pool opens, so a refused host leaks no connections. A misspelt
+  // private type would otherwise exclude nothing, silently: fail closed.
+  for (const t of host.privateSubjectTypes ?? []) {
+    if (!host.registry.subjectTypes.some((st) => st.name === t)) {
+      throw new RegistryError(`privateSubjectTypes: "${t}" is not a subject type in the host's registry`);
+    }
+  }
   const handle = openDb(host.db.url, host.db.schema);
   const store = createStore(handle, host);
   const record = createRecord(host, store);

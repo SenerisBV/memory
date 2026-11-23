@@ -191,10 +191,15 @@ const { id } = await memory.contribute({ about: ["person:someone", "pursuit:a-tr
 
 // The live notes about any of the listed subjects, newest first, each once (`limit` defaults to 200).
 // Each row is { id, about, content, why, actor, ts }; `actor` is null when none was recorded.
+// Takes `privateScope` (see "Keeping private notes out of shared dossiers").
 const notes = await memory.listContributions({ about: ["person:someone", "pursuit:a-trip"] });
 
-// Retire a note or an observation by id. The row is kept, marked retired, and every read stops
-// returning it. Returns false if the id is unknown or already retired.
+// Retire a note or an observation by id. The row is kept, marked retired, and every live read
+// (project, recall's projection, listContributions, the next consolidation's evidence) stops
+// returning it at once. Returns false if the id is unknown or already retired. A host that
+// consolidates sees the retirement in a subject's dossier only at the next consolidation (retire
+// dirties every subject the row was about); until then the dossier on disk, and so `recall` when it
+// reads that dossier, may still carry the retired text forward.
 await memory.retire({ id, actor: { kind: "person", id: "u1" }, reason: "no longer true" });
 
 // The full readable evidence for a subject, or null if there's nothing.
@@ -212,15 +217,32 @@ await memory.subjects.putAlias("cust-4411", "person:someone"); // your id -> a s
 await memory.subjects.resolveLocalKey("cust-4411");           // "person:someone", or the input unchanged
 ```
 
-`recall` takes `{ name, intro, priority?, maxChars? }` and returns a
+`recall` takes `{ name, intro, priority?, maxChars?, privateScope? }` and returns a
 prompt-section-shaped object; `maxChars` caps the body.
 
 ### Keeping private notes out of shared dossiers
 
-Set `privateSubjectTypes: ["practice"]` on the host and a note about both `carrier:x` and
-`practice:a` is left out of `carrier:x`'s evidence when it is consolidated, because a dossier is
-read by everyone. The same note still goes into `practice:a`'s dossier, and `listContributions`
-still returns it. With no `privateSubjectTypes`, nothing is excluded.
+Set `privateSubjectTypes: ["practice"]` on the host and a note or observation about both
+`carrier:x` and `practice:a` is left out of `carrier:x`'s evidence when it is consolidated, because
+a dossier is read by everyone. The same row still goes into `practice:a`'s dossier. A composite
+that is not itself of a private type does not roll up a private member's dossier. Every entry in
+`privateSubjectTypes` must be a subject type in the host's registry, or `createMemory` throws.
+
+Reads take the same rule. `project`, `recall` and `listContributions` leave out a row whose
+private subjects are not all either the subject being read (for `listContributions`, one of its
+`about` keys) or listed in `privateScope`, the private subjects this reader may see:
+
+```ts
+await memory.recall("carrier:x", { name: "carrier", intro: "…" });                              // no practice's notes
+await memory.recall("carrier:x", { name: "carrier", intro: "…", privateScope: ["practice:a"] }); // practice:a's too, not practice:b's
+await memory.project("carrier:x", { privateScope: ["practice:a"] });
+await memory.listContributions({ about: ["carrier:x"], privateScope: ["practice:a"] });
+```
+
+The filter runs in SQL before any limit. `recall` answers from a synthesized dossier when one
+exists, and a shared subject's dossier never carries private rows, so `privateScope` adds rows only
+when `recall` falls back to the projection. With no `privateSubjectTypes`, nothing is excluded and
+`privateScope` is ignored.
 
 ### Who can read what
 

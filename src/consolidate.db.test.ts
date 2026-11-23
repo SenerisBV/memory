@@ -251,3 +251,52 @@ describe("privateSubjectTypes", () => {
     expect(p).toContain("practice-private note");
   });
 });
+
+describe("privateSubjectTypes: observations and composites", () => {
+  const registry = { ...DEFAULT_REGISTRY, subjectTypes: [...DEFAULT_REGISTRY.subjectTypes,
+    { name: "carrier", gloss: "a payer", mintedBy: "host" as const, composite: false },
+    { name: "practice", gloss: "a practice", mintedBy: "host" as const, composite: false }] };
+  const prompt = async (key: string, over: { privateSubjectTypes?: string[] }) => {
+    const host = fakeHost({ registry, ...over });
+    const store = createStore(handle, host);
+    await store.getOrCreateSubject("carrier:x", "X");
+    await store.getOrCreateSubject("practice:a", "A");
+    await store.insertObservation(obs("carrier:x", ["carrier:x"], "pays", "shared obs"));
+    await store.insertObservation(obs("carrier:x", ["carrier:x", "practice:a"], "denies", "practice-private obs"));
+    await store.markDirty(["carrier:x", "practice:a"]);
+    const { fn, calls } = fakeComplete(["## Model\n\nok\n", "## Model\n\nok\n"]);
+    await createConsolidate(host, store).consolidate({ synth: fn, minObs: 1 });
+    return calls.map((x) => x.messages[0]!.content).find((m) => m.startsWith(`Subject: ${key === "carrier:x" ? "X" : "A"}\n`))!;
+  };
+
+  test("consolidating carrier:x skips an observation that is also about practice:a", async () => {
+    const p = await prompt("carrier:x", { privateSubjectTypes: ["practice"] });
+    expect(p).toContain("shared obs");
+    expect(p).not.toContain("practice-private obs");
+  });
+  test("consolidating practice:a includes that observation", async () => {
+    const p = await prompt("practice:a", { privateSubjectTypes: ["practice"] });
+    expect(p).toContain("practice-private obs");
+  });
+  test("with no privateSubjectTypes, observations are unchanged", async () => {
+    const p = await prompt("carrier:x", {});
+    expect(p).toContain("shared obs");
+    expect(p).toContain("practice-private obs");
+  });
+  test("a composite that is not a private type skips a member that is", async () => {
+    const host = fakeHost({ registry, privateSubjectTypes: ["practice"] });
+    const store = createStore(handle, host);
+    await store.getOrCreateSubject("carrier:x", "X");
+    await store.getOrCreateSubject("practice:a", "A");
+    await store.getOrCreateSubject("group:g", "G");
+    await store.setMembers("group:g", ["carrier:x", "practice:a"]);
+    await store.insertObservation(obs("carrier:x", ["carrier:x"], "pays", "shared obs"));
+    await store.insertObservation(obs("practice:a", ["practice:a"], "bills", "own obs"));
+    await store.markDirty(["carrier:x", "practice:a", "group:g"]);
+    const { fn, calls } = fakeComplete(["## Model\n\ncarrier dossier\n", "## Model\n\npractice dossier\n", "## Model\n\ngroup dossier\n"]);
+    await createConsolidate(host, store).consolidate({ synth: fn, minObs: 1 });
+    const g = calls.map((x) => x.messages[0]!.content).find((m) => m.startsWith("Subject: G\n"))!;
+    expect(g).toContain("carrier dossier");
+    expect(g).not.toContain("practice dossier");
+  });
+});

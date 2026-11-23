@@ -45,9 +45,12 @@ export interface MemoryHost {
    *  30 days. `null` = never reap: consolidate() deletes nothing and reports
    *  `reaped: 0`. A host whose store is its record of history passes null. */
   supersededRetentionDays?: number | null;
-  /** Subject types whose notes are private to that subject. When consolidating
-   *  subject S, a note that is also about a subject of one of these types
-   *  (other than S itself) is left out of S's evidence, so it never reaches a
-   *  shared dossier. Absent = nothing is excluded. */
+  /** Subject types whose notes and observations are private to that subject.
+   *  When consolidating subject S, a row that is also about a subject of one
+   *  of these types (other than S itself) is left out of S's evidence, so it
+   *  never reaches a shared dossier. `project`, `recall` and
+   *  `listContributions` apply the same rule, widened by the caller's
+   *  `privateScope`. Each entry must be a type in `registry` (createMemory
+   *  throws otherwise). Absent = nothing is excluded. */
   privateSubjectTypes?: string[];
 }
