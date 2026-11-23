@@ -16,7 +16,7 @@
 // file no longer does.
 import { createClassify } from "./classify";
 import { decide, type DecideInput, type DecideLiveRow, type FetchLiveRowsArgs } from "./decide";
-import type { ObservationInput } from "./extract";
+import type { Actor, ObservationInput } from "./extract";
 import { clampGrade, gradeForSource } from "./grade";
 import type { MemoryHost } from "./host";
 import { buildNaturalKey, slugifyEntity } from "./keys";
@@ -137,13 +137,19 @@ export interface RecordObservationsInput {
   classify?: DecideInput["classify"];
 }
 
+export type { Actor };
+
 export interface RecordContributionInput {
   /** One subject: an existing key, a host-registered alias, or a proposal. */
   about: string;
   content: string;
-  why: string;
+  /** Optional; stored as "" when absent. */
+  why?: string;
   source?: string;
+  /** Defaults to `actor.id` when the actor is a person. */
   principalId?: string | null;
+  /** Who this is on behalf of, recorded beside (not instead of) the host's authorAgent. */
+  actor?: Actor;
   ts?: Date;
 }
 
@@ -562,6 +568,7 @@ export function createRecord(host: MemoryHost, store: Store) {
         visibility,
         kind: fannedOut ? "general" : (classified[v.index]?.kind ?? "general"),
         topics: classified[v.index]?.topics ?? ["general"],
+        actorKind: c.actor?.kind ?? null, actorId: c.actor?.id ?? null, actorLabel: c.actor?.label ?? null,
       };
       // FINAL FIX WAVE, IMPORTANT 2: the per-candidate write gets its own
       // try/catch, the way the supersede below already has one.
@@ -794,21 +801,23 @@ export function createRecord(host: MemoryHost, store: Store) {
   // through the same resolver the observation path uses, so an alias or a
   // proposal works here too; a string that names no known subject throws
   // rather than filing the statement somewhere it does not belong.
-  async function recordContribution(input: RecordContributionInput): Promise<void> {
+  async function recordContribution(input: RecordContributionInput): Promise<{ id: string }> {
     const { keys } = await resolveAbout([input.about]);
     // resolveAbout throws for a string that is undeclared or unknown, so a
     // string entry either resolves or does not return — there is no dropped
     // case for a single string to leave `keys` empty.
     const subjectKey = keys[0]!;
-    await store.insertContribution({
+    const { id } = await store.insertContribution({
       subjectKey,
       content: input.content.trim(),
-      why: input.why.trim(),
+      why: (input.why ?? "").trim(),
       source: input.source ?? "contribution",
-      principalId: input.principalId ?? null,
+      principalId: input.principalId ?? (input.actor?.kind === "person" ? input.actor.id : null),
       ts: input.ts ?? new Date(),
+      actorKind: input.actor?.kind ?? null, actorId: input.actor?.id ?? null, actorLabel: input.actor?.label ?? null,
     });
     await store.markDirty([subjectKey]);
+    return { id };
   }
 
   return { recordObservations, recordContribution };

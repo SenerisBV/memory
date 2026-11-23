@@ -63,6 +63,11 @@ export function buildTables(schemaName: string) {
       supersededById: text("supersededById"),
       kind: text("kind").notNull().default("general"),
       topics: text("topics").array().notNull().default(sql`ARRAY['general'::text]`),
+      // Who a write is on behalf of (a person or an agent), when the host says.
+      // Nullable: a write with no actor is exactly what it was before.
+      actorKind: text("actorKind"),
+      actorId: text("actorId"),
+      actorLabel: text("actorLabel"),
     },
     (t) => [
       uniqueIndex("Observation_authorAgent_subjectKey_naturalKey_key").on(t.authorAgent, t.subjectKey, t.naturalKey),
@@ -87,6 +92,9 @@ export function buildTables(schemaName: string) {
       content: text("content").notNull(),
       why: text("why").notNull(),
       source: text("source").notNull().default("contribution"),
+      actorKind: text("actorKind"),
+      actorId: text("actorId"),
+      actorLabel: text("actorLabel"),
       ts: ts3("ts").notNull().default(sql`CURRENT_TIMESTAMP`),
       createdAt: ts3("createdAt").notNull().default(sql`CURRENT_TIMESTAMP`),
     },

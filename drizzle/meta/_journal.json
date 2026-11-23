@@ -15,6 +15,13 @@
       "when": 1794495733820,
       "tag": "0001_subject_dirty_gen",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795457684651,
+      "tag": "0002_flashy_loners",
+      "breakpoints": true
     }
   ]
 }

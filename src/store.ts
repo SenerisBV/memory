@@ -21,6 +21,7 @@ export interface ObservationData {
   subjectKey: string; about: string[]; predicate: string; value: string; valueNum: number | null; unit: string | null;
   ts: Date; source: string; sourceGrade: string; naturalKey: string | null; provenancePath: string | null;
   visibility: string; kind: string; topics: string[];
+  actorKind?: string | null; actorId?: string | null; actorLabel?: string | null;
 }
 
 // See docs/DESIGN.md §8. Scopes AGENTS, not humans:
@@ -242,6 +243,8 @@ export function createStore(handle: Handle, host: MemoryHost) {
             predicate: data.predicate, value: data.value, valueNum: data.valueNum, unit: data.unit,
             kind: data.kind, topics: data.topics, ts: data.ts, source: data.source, sourceGrade: data.sourceGrade,
             provenancePath: data.provenancePath,
+            // a re-observation by a known actor takes the actor; one without never erases it
+            ...(data.actorKind ? { actorKind: data.actorKind, actorId: data.actorId, actorLabel: data.actorLabel } : {}),
             // escalate-only: an author row never becomes fleet by upsert; a fleet row does become author
             ...(data.visibility === "author" ? { visibility: "author" } : {}),
           },
@@ -261,8 +264,9 @@ export function createStore(handle: Handle, host: MemoryHost) {
     return r.length > 0;
   }
 
-  async function insertContribution(data: { subjectKey: string; content: string; why: string; source: string; principalId: string | null; ts: Date }): Promise<void> {
-    await db.insert(contribution).values({ ...data, authorAgent: host.agentId });
+  async function insertContribution(data: { subjectKey: string; content: string; why: string; source: string; principalId: string | null; ts: Date; actorKind?: string | null; actorId?: string | null; actorLabel?: string | null }): Promise<{ id: string }> {
+    const [row] = await db.insert(contribution).values({ ...data, authorAgent: host.agentId }).returning({ id: contribution.id });
+    return row!;
   }
 
   /** The two reads health() is built on.

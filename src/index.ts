@@ -77,5 +77,5 @@ export { DEFAULT_REGISTRY, withTypes, RegistryError } from "./registry";
 export { computeHealth } from "./health";
 export type { MemoryHost, CompleteFn, LogEvent, Lens } from "./host";
 export type { Registry, SubjectType, Topic } from "./registry";
-export type { ObservationInput, AboutEntry } from "./extract";
+export type { ObservationInput, AboutEntry, Actor } from "./extract";
 export type { HealthReport, HealthFlag } from "./health";

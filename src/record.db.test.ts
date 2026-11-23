@@ -232,3 +232,53 @@ test("a verdict against a row this candidate is not about is downgraded to recor
   const notes = (audit!.payload!.verdicts as { why: string }[]).map((v) => v.why).join(" | ");
   expect(notes).toContain("DOWNGRADED");
 });
+
+test("contribute stores the actor and returns the new id", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  const res = await record.recordContribution({
+    about: "person:pat", content: "Bill the lab fee separately",
+    actor: { kind: "person", id: "42", label: "Pat Biller" },
+  });
+  const rows = await handle.db.select().from(handle.tables.contribution);
+  expect(rows.length).toBe(1);
+  expect(res.id).toBe(rows[0]!.id);
+  expect(rows[0]).toMatchObject({ actorKind: "person", actorId: "42", actorLabel: "Pat Biller", principalId: "42", why: "" });
+});
+
+test("an explicit principalId wins over the person actor's id", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  await record.recordContribution({ about: "person:pat", content: "x", principalId: "p-9", actor: { kind: "person", id: "42" } });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(row).toMatchObject({ principalId: "p-9", actorId: "42", actorLabel: null });
+});
+
+test("an agent actor does not set principalId", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  await record.recordContribution({ about: "person:pat", content: "x", why: "because", actor: { kind: "agent", id: "helper" } });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(row).toMatchObject({ actorKind: "agent", actorId: "helper", principalId: null, why: "because" });
+});
+
+test("contribute without an actor behaves as before", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  const res = await record.recordContribution({ about: "person:pat", content: "x", why: "y" });
+  const [row] = await handle.db.select().from(handle.tables.contribution);
+  expect(res.id).toBe(row!.id);
+  expect(row).toMatchObject({ actorKind: null, actorId: null, actorLabel: null, principalId: null, authorAgent: host.agentId, why: "y" });
+});
+
+test("record stores the actor on observations", async () => {
+  await store.getOrCreateSubject("person:pat", "Pat");
+  await record.recordObservations({
+    source: "office-visit", classify, reconcile: recordAll,
+    observations: [
+      { about: ["person:pat"], predicate: "has-class", value: "art", actor: { kind: "person", id: "42", label: "Pat Biller" } },
+      { about: ["person:pat"], predicate: "has-pet", value: "a cat" },
+    ],
+  });
+  const rows = await handle.db.select().from(handle.tables.observation);
+  const withActor = rows.find((r) => r.predicate === "has-class")!;
+  const without = rows.find((r) => r.predicate === "has-pet")!;
+  expect(withActor).toMatchObject({ actorKind: "person", actorId: "42", actorLabel: "Pat Biller" });
+  expect(without).toMatchObject({ actorKind: null, actorId: null, actorLabel: null });
+});

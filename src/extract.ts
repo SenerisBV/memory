@@ -4,6 +4,9 @@ import type { Store } from "./store";
 
 export type AboutEntry = string | { type: string; label: string };
 
+/** Who a write is on behalf of. Optional everywhere; `authorAgent` stays the host. */
+export type Actor = { kind: "person" | "agent"; id: string; label?: string };
+
 export interface ObservationInput {
   about: AboutEntry[];
   predicate: string;
@@ -13,6 +16,7 @@ export interface ObservationInput {
   naturalKey?: string | null;
   /** Grade the extractor proposes; clamped to the source ceiling at write time. */
   grade?: string;
+  actor?: Actor;
 }
 
 function isAboutEntry(x: unknown): x is AboutEntry {
