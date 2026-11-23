@@ -20,21 +20,21 @@
       "idx": 2,
       "version": "7",
       "when": 1795457684651,
-      "tag": "0002_flashy_loners",
+      "tag": "0002_actor_columns",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "7",
       "when": 1795457785871,
-      "tag": "0003_thin_matthew_murdock",
+      "tag": "0003_contribution_about",
       "breakpoints": true
     },
     {
       "idx": 4,
       "version": "7",
       "when": 1795457936472,
-      "tag": "0004_freezing_kingpin",
+      "tag": "0004_retired_columns",
       "breakpoints": true
     }
   ]
